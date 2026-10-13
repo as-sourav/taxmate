@@ -440,6 +440,68 @@ class TestQuotationMapper(FrappeTestCase):
 		self.assertIn("taxmate.api.material_request.make_purchase_orders_by_supplier", methods)
 		self.assertIn("taxmate.api.material_request.make_stock_entry", methods)
 
+	def test_make_sales_order_stamps_delivery_date(self):
+		"""Quotation has no delivery_date; mapped SO must carry one for insert."""
+		from frappe.utils import add_days, getdate
+
+		from taxmate.api.quotation import make_sales_order
+		from taxmate.api.resource import insert
+		from taxmate.api.workflow import cancel, submit
+
+		company = frappe.defaults.get_user_default("Company") or frappe.db.get_value("Company", {}, "name")
+		if not company:
+			self.skipTest("No Company configured")
+		customer = frappe.db.get_value("Customer", {"disabled": 0}, "name")
+		if not customer:
+			self.skipTest("No active Customer available")
+		item = frappe.db.get_value("Item", {"disabled": 0, "is_sales_item": 1}, "name")
+		if not item:
+			self.skipTest("No sales item available")
+
+		qtn = insert(
+			{
+				"doctype": "Quotation",
+				"quotation_to": "Customer",
+				"party_name": customer,
+				"transaction_date": "2026-10-01",
+				"valid_till": "2026-10-31",
+				"company": company,
+				"vat_emirate": "Dubai",
+				"items": [{"item_code": item, "qty": 1, "rate": 100}],
+			}
+		)
+		self.addCleanup(frappe.delete_doc, "Quotation", qtn["name"], force=True, ignore_permissions=True)
+		submit({"doctype": "Quotation", "name": qtn["name"]})
+		self.addCleanup(cancel, "Quotation", qtn["name"])
+
+		mapped = make_sales_order(qtn["name"])
+		self.assertTrue(mapped.get("delivery_date"))
+		self.assertEqual(getdate(mapped["delivery_date"]), add_days(getdate("2026-10-01"), 21))
+		for row in mapped.get("items") or []:
+			self.assertEqual(getdate(row["delivery_date"]), getdate(mapped["delivery_date"]))
+
+		payload = {
+			"doctype": "Sales Order",
+			"customer": mapped["customer"],
+			"company": mapped.get("company") or company,
+			"transaction_date": mapped.get("transaction_date") or "2026-10-01",
+			"delivery_date": mapped["delivery_date"],
+			"vat_emirate": mapped.get("vat_emirate") or "Dubai",
+			"items": [
+				{
+					"item_code": row["item_code"],
+					"qty": row.get("qty") or 1,
+					"rate": row.get("rate") or 0,
+					"delivery_date": mapped["delivery_date"],
+				}
+				for row in (mapped.get("items") or [])
+			],
+		}
+		so = insert(payload)
+		self.addCleanup(frappe.delete_doc, "Sales Order", so["name"], force=True, ignore_permissions=True)
+		self.assertEqual(so.get("docstatus"), 0)
+		self.assertTrue(so.get("delivery_date"))
+
 	def test_stock_doctypes_in_catalog(self):
 		from taxmate.api import get_catalog
 
@@ -514,3 +576,68 @@ class TestMakeDnReturn(FrappeTestCase):
 
 		with self.assertRaises(Exception):
 			make_return(source_name=draft_pr)
+
+
+class TestPurchaseReturnTotals(FrappeTestCase):
+	"""A partial receipt return keeps the order amount and reduces what was received."""
+
+	def test_partial_return_updates_received_qty_and_keeps_order_amount(self):
+		from frappe.utils import flt
+
+		from taxmate.api.purchase_receipt import make_return
+
+		source = frappe.db.sql(
+			"""
+			select pr.name
+			from `tabPurchase Receipt` pr
+			inner join `tabPurchase Receipt Item` pri on pri.parent = pr.name
+			where pr.docstatus = 1
+				and ifnull(pr.is_return, 0) = 0
+				and ifnull(pr.per_returned, 0) < 100
+				and ifnull(pri.purchase_order, '') != ''
+				and pri.qty > 1
+			order by pr.modified desc
+			limit 1
+			""",
+			as_dict=True,
+		)
+		if not source:
+			self.skipTest("No submitted purchase receipt linked to an order")
+		source_name = source[0].name
+		mapped = make_return(source_name=source_name)
+		row = mapped["items"][0]
+		if abs(flt(row.get("qty"))) <= 1 or not row.get("purchase_order_item"):
+			self.skipTest("Return line is not a partial quantity against an order")
+		order_before = frappe.db.get_value(
+			"Purchase Order Item",
+			row["purchase_order_item"],
+			["amount", "received_qty", "returned_qty", "rate"],
+			as_dict=True,
+		)
+		partial = -1 * flt(abs(flt(row["qty"])) / 2, 3)
+		conv = flt(row.get("conversion_factor")) or 1
+		rejected = flt(row.get("rejected_qty"))
+		received = partial + rejected
+		row["qty"] = partial
+		row["received_qty"] = received
+		row["stock_qty"] = partial * conv
+		row["received_stock_qty"] = received * conv
+		row["amount"] = partial * flt(row.get("rate"))
+
+		doc = frappe.get_doc(mapped)
+		doc.insert()
+		doc.submit()
+
+		self.assertEqual(flt(doc.items[0].received_qty), flt(received))
+		self.assertAlmostEqual(flt(doc.items[0].amount), flt(partial * flt(row.get("rate"))), places=2)
+		self.assertLess(abs(flt(doc.grand_total)), abs(flt(frappe.db.get_value("Purchase Receipt", source_name, "grand_total"))))
+
+		order_after = frappe.db.get_value(
+			"Purchase Order Item",
+			row["purchase_order_item"],
+			["amount", "received_qty", "returned_qty"],
+			as_dict=True,
+		)
+		self.assertAlmostEqual(flt(order_after.amount), flt(order_before.amount), places=2)
+		self.assertAlmostEqual(flt(order_after.received_qty), flt(order_before.received_qty) + flt(received), places=3)
+		self.assertAlmostEqual(flt(order_after.returned_qty), flt(order_before.returned_qty) + abs(flt(partial)), places=3)

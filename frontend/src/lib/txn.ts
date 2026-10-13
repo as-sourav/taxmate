@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { METHOD } from "./frappe";
+import { parseNum } from "./format";
 
 /** Shape of taxmate.api.stock.item_qty message. */
 export type ItemQtyMessage = {
@@ -138,13 +139,134 @@ export type PartyDetails = {
   supplier_group?: string;
 };
 
+export type DiscountBasis = "Net Total" | "Grand Total";
+
 export type TotalsPreview = {
+  total?: number;
   net_total?: number;
+  discount_amount?: number;
+  additional_discount_percentage?: number;
+  apply_discount_on?: DiscountBasis | string;
   total_taxes_and_charges?: number;
   grand_total?: number;
   rounded_total?: number;
   taxes?: Record<string, unknown>[];
+  items?: { idx?: number; item_code?: string; qty?: number; rate?: number; amount?: number; net_amount?: number }[];
 };
+
+/** ERPNext's doctype default is Grand Total. A saved discount with a blank basis was calculated that way. */
+export function readDiscountBasis(value: unknown, hasDiscount = false): DiscountBasis {
+  if (value === "Grand Total" || value === "Net Total") return value;
+  return hasDiscount ? "Grand Total" : "Net Total";
+}
+
+/** Header fields for the additional (order) discount. Zero clears a previously saved amount. */
+export function orderDiscountFields(percent: number, basis: DiscountBasis): Record<string, unknown> {
+  const pct = Number(percent) || 0;
+  if (pct <= 0) {
+    return {
+      additional_discount_percentage: 0,
+      apply_discount_on: basis,
+      discount_amount: 0,
+    };
+  }
+  return {
+    additional_discount_percentage: pct,
+    apply_discount_on: basis,
+  };
+}
+
+/** Percent off the product's list rate. The line rate follows, so the amount column stays the source of the total. */
+export function applyLineDiscountPct(line: TxnLine, percent: number): TxnLine {
+  const pct = Math.min(100, Math.max(0, Number(percent) || 0));
+  const list = Number(line.price_list_rate) || Number(line.rate) || 0;
+  const discount = (list * pct) / 100;
+  return {
+    ...line,
+    price_list_rate: Number(line.price_list_rate) || list || undefined,
+    discount_percentage: pct,
+    discount_amount: discount,
+    rate: list - discount,
+  };
+}
+
+/** Keep the product discount in step when the rate is typed by hand. */
+export function applyLineRate(line: TxnLine, rate: number): TxnLine {
+  const list = Number(line.price_list_rate) || 0;
+  if (list > 0) {
+    const cut = Math.max(list - rate, 0);
+    return {
+      ...line,
+      rate,
+      discount_amount: cut,
+      discount_percentage: Math.round((cut / list) * 10000) / 100,
+    };
+  }
+  return { ...line, rate };
+}
+
+type DiscountLine = {
+  qty?: number;
+  rate?: number;
+  price_list_rate?: number;
+  discount_percentage?: number;
+  discount_amount?: number;
+};
+
+/** Sum of per-product discounts (list rate minus selling/buying rate), not the order-level discount. */
+export function productDiscountTotal(lines: DiscountLine[]): number {
+  return lines.reduce((sum, line) => {
+    const qty = Number(line.qty) || 0;
+    const list = Number(line.price_list_rate) || 0;
+    const rate = Number(line.rate) || 0;
+    if (list > rate) return sum + (list - rate) * qty;
+    if (!(list > 0) && (Number(line.discount_amount) || 0) > 0) {
+      return sum + (Number(line.discount_amount) || 0) * qty;
+    }
+    return sum;
+  }, 0);
+}
+
+export function lineHasProductDiscount(line: DiscountLine): boolean {
+  const list = Number(line.price_list_rate) || 0;
+  const rate = Number(line.rate) || 0;
+  if (list > rate) return true;
+  if ((Number(line.discount_percentage) || 0) > 0) return true;
+  if ((Number(line.discount_amount) || 0) > 0) return true;
+  return false;
+}
+
+type ReturnQtyLine = {
+  qty?: number;
+  rate?: number;
+  conversion_factor?: number;
+  rejected_qty?: number;
+  received_qty?: number;
+  stock_qty?: number;
+  received_stock_qty?: number;
+  amount?: number;
+};
+
+/**
+ * A return line stores a negative quantity. ERPNext requires
+ * received_qty = qty + rejected_qty, and stock qty follows the conversion
+ * factor. Editing only qty leaves the mapped received qty stale and the
+ * return total wrong until the server happens to repair it.
+ */
+export function applyReturnQty<T extends ReturnQtyLine>(line: T, raw: string | number): T {
+  const qty = -Math.abs(parseNum(raw));
+  const conv = Number(line.conversion_factor) || 1;
+  const rejected = Number(line.rejected_qty) || 0;
+  const received = qty + rejected;
+  return {
+    ...line,
+    qty,
+    received_qty: received,
+    stock_qty: qty * conv,
+    received_stock_qty: received * conv,
+    amount: qty * (Number(line.rate) || 0),
+  };
+}
 
 export type TxnSide = "selling" | "buying";
 
@@ -173,6 +295,9 @@ export function stampItemDetails(line: TxnLine, m: Record<string, unknown>): Txn
     conversion_factor: Number(m.conversion_factor ?? line.conversion_factor ?? 1) || 1,
     rate: Number(m.price_list_rate ?? m.rate ?? line.rate) || line.rate,
     price_list_rate: Number(m.price_list_rate ?? line.price_list_rate ?? 0) || undefined,
+    // A new item does not inherit the previous line's product discount.
+    discount_percentage: undefined,
+    discount_amount: undefined,
     warehouse: m.warehouse ? String(m.warehouse) : line.warehouse,
     income_account: m.income_account ? String(m.income_account) : line.income_account,
     expense_account: m.expense_account ? String(m.expense_account) : line.expense_account,

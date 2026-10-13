@@ -221,6 +221,45 @@ class TestTxnHelpers(FrappeTestCase):
 		self.assertGreater(float(preview.get("total_taxes_and_charges") or 0), 0)
 		self.assertGreater(float(preview.get("grand_total") or 0), 200)
 
+	def test_preview_discount_basis_is_named_and_changes_the_total(self):
+		"""10% before VAT and 10% after VAT are different amounts, and both come back named."""
+		company = frappe.defaults.get_user_default("Company") or frappe.db.get_value("Company", {}, "name")
+		item = frappe.db.get_value("Item", {"disabled": 0, "is_purchase_item": 1}, "name")
+		tax = frappe.db.get_value("Purchase Taxes and Charges Template", {"company": company}, "name")
+		if not company or not item or not tax:
+			self.skipTest("Need company, purchase item, purchase tax template")
+
+		from taxmate.api.accounts import preview_taxes_and_totals
+
+		base = {
+			"doctype": "Purchase Order",
+			"company": company,
+			"transaction_date": frappe.utils.today(),
+			"currency": frappe.get_cached_value("Company", company, "default_currency") or "AED",
+			"conversion_rate": 1,
+			"taxes_and_charges": tax,
+			"items": [{"item_code": item, "qty": 2, "rate": 100}],
+		}
+		plain = preview_taxes_and_totals(base)
+		on_net = preview_taxes_and_totals({
+			**base,
+			"additional_discount_percentage": 10,
+			"apply_discount_on": "Net Total",
+		})
+		on_grand = preview_taxes_and_totals({
+			**base,
+			"additional_discount_percentage": 10,
+			"apply_discount_on": "Grand Total",
+		})
+
+		self.assertAlmostEqual(float(on_net.get("discount_amount") or 0), 20, places=2)
+		self.assertEqual(on_net.get("apply_discount_on"), "Net Total")
+		self.assertAlmostEqual(float(on_net.get("additional_discount_percentage") or 0), 10, places=2)
+		self.assertLess(float(on_net.get("grand_total") or 0), float(plain.get("grand_total") or 0))
+		self.assertGreater(float(on_grand.get("discount_amount") or 0), float(on_net.get("discount_amount") or 0))
+		self.assertEqual(on_grand.get("apply_discount_on"), "Grand Total")
+		self.assertIn("total", on_net)
+
 	def test_apply_price_list_returns_children(self):
 		item = frappe.db.get_value("Item", {"disabled": 0, "is_sales_item": 1})
 		company = frappe.defaults.get_user_default("Company") or frappe.db.get_value("Company", {}, "name")

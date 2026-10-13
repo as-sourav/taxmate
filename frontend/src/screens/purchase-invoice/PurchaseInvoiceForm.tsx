@@ -10,11 +10,11 @@ import { useDoc, useDocList, useInsert, useSave } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canSubmitSales } from "../../lib/roles";
 import { money, parseNum, toIsoDate } from "../../lib/format";
-import { linePayload, stampItemDetails, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type PartyDetails, type TxnLine } from "../../lib/txn";
-import { LineTrack, PartyFields, PaymentScheduleTable } from "../../components/txnFields";
+import { applyLineRate, linePayload, orderDiscountFields, productDiscountTotal, readDiscountBasis, stampItemDetails, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type DiscountBasis, type PartyDetails, type TxnLine } from "../../lib/txn";
+import { LineDiscountInput, LineTrack, OrderDiscountFields, PartyFields, PaymentScheduleTable, TxnTotals } from "../../components/txnFields";
 import { UAE_EMIRATES } from "../../types/uae";
 import { t } from "../../i18n/strings";
-import { Card, CheckField, ErrorBox, Field, Loading, PageHead, SumRow } from "../../components/ui";
+import { Card, CheckField, ErrorBox, Field, Loading, PageHead } from "../../components/ui";
 import { FormLayout } from "../../components/form";
 import LinkField from "../../components/LinkField";
 import LineItems, { type LineField } from "../../components/LineItems";
@@ -34,6 +34,7 @@ type InvoiceDoc = {
   tax_id?: string;
   payment_terms_template?: string;
   additional_discount_percentage?: number;
+  apply_discount_on?: string;
   on_hold?: number;
   net_total?: number;
   total_taxes_and_charges?: number;
@@ -70,6 +71,7 @@ export default function PurchaseInvoiceForm() {
   const [taxTemplate, setTaxTemplate] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("");
   const [discountPct, setDiscountPct] = useState(0);
+  const [discountOn, setDiscountOn] = useState<DiscountBasis>("Net Total");
   const [onHold, setOnHold] = useState<0 | 1>(0);
   const [currency, setCurrency] = useState("");
   const [conversionRate, setConversionRate] = useState(1);
@@ -103,6 +105,7 @@ export default function PurchaseInvoiceForm() {
     setTaxTemplate(d.taxes_and_charges || "");
     setPaymentTerms(d.payment_terms_template || "");
     setDiscountPct(Number(d.additional_discount_percentage || 0));
+    setDiscountOn(readDiscountBasis(d.apply_discount_on, Number(d.additional_discount_percentage) > 0));
     setOnHold(d.on_hold ? 1 : 0);
     setCurrency(d.currency || "");
     setConversionRate(Number(d.conversion_rate) || 1);
@@ -111,6 +114,7 @@ export default function PurchaseInvoiceForm() {
     setLines((d.items ?? []).map((l) => ({
       item_code: l.item_code, item_name: l.item_name, description: l.description,
       qty: l.qty, rate: l.rate, uom: l.uom, expense_account: l.expense_account,
+      price_list_rate: l.price_list_rate, discount_percentage: l.discount_percentage, discount_amount: l.discount_amount,
       cost_center: l.cost_center, item_tax_template: l.item_tax_template,
       uae_item_type: l.uae_item_type, hs_code: l.hs_code, sac_code: l.sac_code,
       warehouse: l.warehouse || d.set_warehouse || "",
@@ -207,20 +211,22 @@ export default function PurchaseInvoiceForm() {
       credit_to: party.credit_to,
       currency: currency || party.currency || companyDefaults.currency || session.currency,
       conversion_rate: (!currency || currency === companyCurrency) ? 1 : conversionRate,
+      ...orderDiscountFields(discountPct, discountOn),
       update_stock: updateStock ? 1 : 0,
       set_warehouse: updateStock ? (setWarehouse || undefined) : undefined,
       items: lines.filter((l) => l.item_code).map((l) => ({
         item_code: l.item_code, qty: l.qty, rate: l.rate, uom: l.uom,
+        price_list_rate: l.price_list_rate, discount_percentage: l.discount_percentage, discount_amount: l.discount_amount,
         expense_account: l.expense_account, cost_center: l.cost_center,
         item_tax_template: l.item_tax_template,
         warehouse: updateStock ? (l.warehouse || setWarehouse || undefined) : undefined,
       })),
     };
-  }, [supplier, postingDate, dueDate, company, emirate, taxTemplate, paymentTerms, party, companyDefaults, session.currency, lines, currency, conversionRate, companyCurrency, updateStock, setWarehouse]);
+  }, [supplier, postingDate, dueDate, company, emirate, taxTemplate, paymentTerms, party, companyDefaults, session.currency, discountPct, discountOn, lines, currency, conversionRate, companyCurrency, updateStock, setWarehouse]);
 
   const { preview, previewing } = useTotalsPreview(
     buildPreviewDoc,
-    [supplier, postingDate, taxTemplate, emirate, lines, currency, conversionRate, updateStock, setWarehouse],
+    [supplier, postingDate, taxTemplate, emirate, discountPct, discountOn, lines, currency, conversionRate, updateStock, setWarehouse],
     txn.previewTotals,
   );
 
@@ -247,7 +253,7 @@ export default function PurchaseInvoiceForm() {
       vat_emirate: emirate,
       taxes_and_charges: taxTemplate || undefined,
       payment_terms_template: paymentTerms || undefined,
-      additional_discount_percentage: discountPct || undefined,
+      ...orderDiscountFields(discountPct, discountOn),
       on_hold: onHold,
       supplier_address: party.supplier_address,
       buying_price_list: party.buying_price_list,
@@ -338,9 +344,20 @@ export default function PurchaseInvoiceForm() {
           <h2 style={{ margin: "0 0 13px", fontSize: 13.5, fontWeight: 600 }}>
             {t("inv.totals")}{previewing ? "…" : ""}
           </h2>
-          <SumRow k={t("sod.net")} v={money(showNet)} currency={displayCurrency} />
-          <SumRow k={t("sod.vat")} v={money(showVat)} currency={displayCurrency} />
-          <SumRow k={t("sod.grand")} v={money(showGrand)} cls="rule total" currency={displayCurrency} />
+          <TxnTotals
+            currency={displayCurrency}
+            itemsTotal={preview?.total ?? net}
+            productDiscount={productDiscountTotal(lines)}
+            orderDiscount={preview?.discount_amount}
+            orderDiscountPercent={discountPct}
+            discountOn={discountOn}
+            net={showNet}
+            vat={showVat}
+            grand={showGrand}
+            netLabel={t("sod.net")}
+            vatLabel={t("sod.vat")}
+            grandLabel={t("sod.grand")}
+          />
         </Card>
       }>
         {isNew && (
@@ -395,10 +412,12 @@ export default function PurchaseInvoiceForm() {
                 {(templates.data ?? []).map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
               </select>
             </Field>
-            <Field label={t("txn.discountPct")}>
-              <input className="ctl" type="number" min={0} max={100} step={0.01} value={discountPct}
-                onChange={(e) => setDiscountPct(parseNum(e.target.value))} />
-            </Field>
+            <OrderDiscountFields
+              percent={discountPct}
+              basis={discountOn}
+              onPercent={setDiscountPct}
+              onBasis={setDiscountOn}
+            />
             <CheckField label={t("supp.onHold")} checked={!!onHold} onChange={(on) => setOnHold(on ? 1 : 0)} />
             <Field label={t("f.paymentTerms")}>
               <select className="ctl" value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)}>
@@ -493,7 +512,13 @@ export default function PurchaseInvoiceForm() {
                 key: "rate", label: t("sod.col.rate"), numeric: true,
                 render: (l, i) => (
                   <input className="ctl mini nn" style={{ width: 96 }} value={l.rate}
-                    onChange={(e) => setLines((ls) => ls.map((x, j) => j === i ? { ...x, rate: parseNum(e.target.value) } : x))} />
+                    onChange={(e) => setLines((ls) => ls.map((x, j) => j === i ? applyLineRate(x, parseNum(e.target.value)) : x))} />
+                ),
+              },
+              {
+                key: "discount", label: t("txn.lineDiscount"), numeric: true,
+                render: (l, i) => (
+                  <LineDiscountInput line={l} onChange={(next) => setLines((ls) => ls.map((x, j) => j === i ? next : x))} />
                 ),
               },
               {

@@ -12,11 +12,11 @@ import { useSession } from "../../lib/session";
 import { canSubmitSales } from "../../lib/roles";
 import { money, parseNum, toIsoDate } from "../../lib/format";
 import { INV_PILL_CLASS, invoiceUiStatus } from "../../lib/status";
-import { linePayload, stampItemDetails, useCreditBalance, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type PartyDetails, type TxnLine } from "../../lib/txn";
-import { CreditLimitNotice, LineTrack, PartyFields, PaymentScheduleTable } from "../../components/txnFields";
+import { applyLineRate, linePayload, orderDiscountFields, productDiscountTotal, readDiscountBasis, stampItemDetails, useCreditBalance, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type DiscountBasis, type PartyDetails, type TxnLine } from "../../lib/txn";
+import { CreditLimitNotice, LineDiscountInput, LineTrack, OrderDiscountFields, PartyFields, PaymentScheduleTable, TxnTotals } from "../../components/txnFields";
 import { UAE_EMIRATES } from "../../types/uae";
 import { t } from "../../i18n/strings";
-import { Card, CheckField, ErrorBox, Field, Loading, PageHead, Pill, SumRow } from "../../components/ui";
+import { Card, CheckField, ErrorBox, Field, Loading, PageHead, Pill } from "../../components/ui";
 import { FormLayout, MissingSummary, ReadinessCard, type Check } from "../../components/form";
 import LinkField from "../../components/LinkField";
 import LineItems, { type LineField } from "../../components/LineItems";
@@ -41,6 +41,7 @@ type InvoiceDoc = {
   contact_person?: string;
   debit_to?: string;
   additional_discount_percentage?: number;
+  apply_discount_on?: string;
   update_stock?: number;
   set_warehouse?: string;
   net_total?: number;
@@ -81,6 +82,7 @@ export default function InvoiceForm() {
   const [taxTemplate, setTaxTemplate] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("");
   const [discountPct, setDiscountPct] = useState(0);
+  const [discountOn, setDiscountOn] = useState<DiscountBasis>("Net Total");
   const [updateStock, setUpdateStock] = useState<0 | 1>(0);
   const [setWarehouse, setSetWarehouse] = useState("");
   const [currency, setCurrency] = useState("");
@@ -122,6 +124,7 @@ export default function InvoiceForm() {
     setTaxTemplate(d.taxes_and_charges || "");
     setPaymentTerms(d.payment_terms_template || "");
     setDiscountPct(Number(d.additional_discount_percentage || 0));
+    setDiscountOn(readDiscountBasis(d.apply_discount_on, Number(d.additional_discount_percentage) > 0));
     setUpdateStock(d.update_stock ? 1 : 0);
     setSetWarehouse(d.set_warehouse || "");
     setCurrency(d.currency || "");
@@ -223,19 +226,19 @@ export default function InvoiceForm() {
       debit_to: party.debit_to,
       currency: currency || party.currency || companyDefaults.currency || session.currency,
       conversion_rate: (!currency || currency === companyCurrency) ? 1 : conversionRate,
-      additional_discount_percentage: discountPct || undefined,
+      ...orderDiscountFields(discountPct, discountOn),
       update_stock: updateStock,
       set_warehouse: updateStock ? setWarehouse || undefined : undefined,
       items: lines.filter((l) => l.item_code).map((l) => linePayload(l)),
     };
   }, [
     customer, postingDate, dueDate, company, emirate, taxTemplate, paymentTerms,
-    party, companyDefaults, session.currency, discountPct, lines, currency, conversionRate, companyCurrency,
+    party, companyDefaults, session.currency, discountPct, discountOn, lines, currency, conversionRate, companyCurrency,
   ]);
 
   const { preview, previewing } = useTotalsPreview(
     buildPreviewDoc,
-    [customer, postingDate, taxTemplate, emirate, discountPct, updateStock, setWarehouse, lines, currency, conversionRate],
+    [customer, postingDate, taxTemplate, emirate, discountPct, discountOn, updateStock, setWarehouse, lines, currency, conversionRate],
     txn.previewTotals,
   );
 
@@ -292,7 +295,7 @@ export default function InvoiceForm() {
       debit_to: party.debit_to,
       currency: currency || party.currency || companyDefaults.currency || session.currency,
       conversion_rate: (!currency || currency === companyCurrency) ? 1 : conversionRate,
-      additional_discount_percentage: discountPct || undefined,
+      ...orderDiscountFields(discountPct, discountOn),
       update_stock: updateStock,
       set_warehouse: updateStock ? setWarehouse || undefined : undefined,
       uae_credit_note_reason: reason || undefined,
@@ -414,9 +417,20 @@ export default function InvoiceForm() {
             <h2 style={{ margin: "0 0 13px", fontSize: 13.5, fontWeight: 600 }}>
               {t("inv.totals")}{previewing ? "…" : ""}
             </h2>
-            <SumRow k={t("sod.net")} v={money(showNet)} currency={displayCurrency} />
-            <SumRow k={t("sod.vat")} v={money(showVat)} currency={displayCurrency} />
-            <SumRow k={t("sod.grand")} v={money(showGrand)} cls="rule total" currency={displayCurrency} />
+            <TxnTotals
+              currency={displayCurrency}
+              itemsTotal={preview?.total ?? net}
+              productDiscount={productDiscountTotal(lines)}
+              orderDiscount={preview?.discount_amount}
+              orderDiscountPercent={discountPct}
+              discountOn={discountOn}
+              net={showNet}
+              vat={showVat}
+              grand={showGrand}
+              netLabel={t("sod.net")}
+              vatLabel={t("sod.vat")}
+              grandLabel={t("sod.grand")}
+            />
           </Card>
         </>
       }>
@@ -484,10 +498,13 @@ export default function InvoiceForm() {
                   {(terms.data ?? []).map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
                 </select>
               </Field>
-              <Field label={t("txn.discountPct")}>
-                <input className="ctl" type="number" min={0} max={100} step={0.01} value={discountPct} disabled={locked}
-                  onChange={(e) => setDiscountPct(parseNum(e.target.value))} />
-              </Field>
+              <OrderDiscountFields
+                percent={discountPct}
+                basis={discountOn}
+                onPercent={setDiscountPct}
+                onBasis={setDiscountOn}
+                disabled={locked}
+              />
               <CheckField
                 label={t("txn.updateStock")}
                 checked={!!updateStock}
@@ -574,7 +591,17 @@ export default function InvoiceForm() {
                   key: "rate", label: t("sod.col.rate"), numeric: true,
                   render: (l, i) => (
                     <input className="ctl mini nn" style={{ width: 104 }} value={l.rate} disabled={locked}
-                      onChange={(e) => setLines((ls) => ls.map((x, j) => j === i ? { ...x, rate: parseNum(e.target.value) } : x))} />
+                      onChange={(e) => setLines((ls) => ls.map((x, j) => j === i ? applyLineRate(x, parseNum(e.target.value)) : x))} />
+                  ),
+                },
+                {
+                  key: "discount", label: t("txn.lineDiscount"), numeric: true,
+                  render: (l, i) => (
+                    <LineDiscountInput
+                      line={l}
+                      disabled={locked}
+                      onChange={(next) => setLines((ls) => ls.map((x, j) => j === i ? next : x))}
+                    />
                   ),
                 },
                 {

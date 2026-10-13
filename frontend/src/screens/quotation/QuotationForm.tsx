@@ -11,11 +11,11 @@ import { useDoc, useDocList, useInsert, useSave } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canSubmitSales } from "../../lib/roles";
 import { money, parseNum, toIsoDate } from "../../lib/format";
-import { linePayload, stampItemDetails, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type PartyDetails, type TxnLine } from "../../lib/txn";
-import { ExchangeRateField, LineTrack, PartyFields, PaymentScheduleTable } from "../../components/txnFields";
+import { applyLineRate, linePayload, orderDiscountFields, productDiscountTotal, readDiscountBasis, stampItemDetails, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type DiscountBasis, type PartyDetails, type TxnLine } from "../../lib/txn";
+import { ExchangeRateField, LineDiscountInput, LineTrack, OrderDiscountFields, PartyFields, PaymentScheduleTable, TxnTotals } from "../../components/txnFields";
 import { UAE_EMIRATES } from "../../types/uae";
 import { t } from "../../i18n/strings";
-import { Card, ErrorBox, Field, Loading, PageHead, SumRow } from "../../components/ui";
+import { Card, ErrorBox, Field, Loading, PageHead } from "../../components/ui";
 import { FormActions, FormLayout, ReadinessCard } from "../../components/form";
 import LinkField from "../../components/LinkField";
 import LineItems, { type LineField } from "../../components/LineItems";
@@ -23,14 +23,26 @@ import LineItems, { type LineField } from "../../components/LineItems";
 type Doc = {
   name: string; party_name?: string; transaction_date?: string; valid_till?: string;
   taxes_and_charges?: string; vat_emirate?: string; docstatus?: number;
-  payment_terms_template?: string; additional_discount_percentage?: number; tc_name?: string;
+  payment_terms_template?: string; additional_discount_percentage?: number; apply_discount_on?: string; tc_name?: string;
   customer_address?: string; shipping_address_name?: string; contact_person?: string;
-  selling_price_list?: string; currency?: string; conversion_rate?: number;
+  company_address?: string; selling_price_list?: string; currency?: string; conversion_rate?: number;
   items?: TxnLine[];
 };
 
 const today = toIsoDate(new Date());
 const plus = (d: number) => { const dt = new Date(); dt.setDate(dt.getDate() + d); return toIsoDate(dt); };
+
+function mergeDraftParty(saved: PartyDetails, fetched: PartyDetails): PartyDetails {
+  return {
+    ...fetched,
+    customer_address: saved.customer_address ?? fetched.customer_address,
+    shipping_address_name: saved.shipping_address_name ?? fetched.shipping_address_name,
+    contact_person: saved.contact_person ?? fetched.contact_person,
+    company_address: saved.company_address ?? fetched.company_address,
+    selling_price_list: saved.selling_price_list ?? fetched.selling_price_list,
+    currency: saved.currency ?? fetched.currency,
+  };
+}
 
 export default function QuotationForm() {
   const { name = "new" } = useParams();
@@ -55,6 +67,7 @@ export default function QuotationForm() {
   const [taxTemplate, setTaxTemplate] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("");
   const [discountPct, setDiscountPct] = useState(0);
+  const [discountOn, setDiscountOn] = useState<DiscountBasis>("Net Total");
   const [tcName, setTcName] = useState("");
   const [emirate, setEmirate] = useState("");
   const [party, setParty] = useState<PartyDetails>({});
@@ -62,9 +75,7 @@ export default function QuotationForm() {
   const [lines, setLines] = useState<TxnLine[]>([]);
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
-  // Party name loaded from the draft. The customer effect that follows must
-  // not replace saved fields; a later customer change should.
-  const hydratedCustomer = useRef<string | null>(null);
+  const keepDraftParty = useRef(false);
   const partyFetchId = useRef(0);
 
   useEffect(() => {
@@ -76,45 +87,40 @@ export default function QuotationForm() {
     setTaxTemplate(d.taxes_and_charges || "");
     setPaymentTerms(d.payment_terms_template || "");
     setDiscountPct(Number(d.additional_discount_percentage || 0));
+    setDiscountOn(readDiscountBasis(d.apply_discount_on, Number(d.additional_discount_percentage) > 0));
     setTcName(d.tc_name || "");
     setEmirate(d.vat_emirate || "");
     setConversionRate(Number(d.conversion_rate) || 1);
-    setParty((prev) => ({
-      ...prev,
+    setParty({
       customer_address: d.customer_address,
       shipping_address_name: d.shipping_address_name,
       contact_person: d.contact_person,
+      company_address: d.company_address,
       selling_price_list: d.selling_price_list,
       currency: d.currency,
-    }));
+    });
     setLines((d.items ?? []).map((it) => ({
       item_code: it.item_code || "",
       item_name: it.item_name,
       uom: it.uom,
       qty: Number(it.qty) || 1,
       rate: Number(it.rate) || 0,
+      price_list_rate: it.price_list_rate,
+      discount_percentage: it.discount_percentage,
+      discount_amount: it.discount_amount,
     })));
-    hydratedCustomer.current = d.party_name || "";
+    keepDraftParty.current = true;
   }, [existing.data]);
 
   useEffect(() => {
     if (!customer) return;
     const fetchId = ++partyFetchId.current;
-    const preserveSaved = hydratedCustomer.current === customer;
-    hydratedCustomer.current = null;
     void txn.fetchParty(customer, txDate).then(async (m) => {
       if (fetchId !== partyFetchId.current || !m) return;
-      if (preserveSaved) {
-        // Party master fills TRN. Address, price list, and currency already
-        // saved on the draft stay, because save() writes those fields back.
-        setParty((saved) => ({
-          ...m,
-          customer_address: saved.customer_address ?? m.customer_address,
-          shipping_address_name: saved.shipping_address_name ?? m.shipping_address_name,
-          contact_person: saved.contact_person ?? m.contact_person,
-          selling_price_list: saved.selling_price_list ?? m.selling_price_list,
-          currency: saved.currency ?? m.currency,
-        }));
+      if (keepDraftParty.current) {
+        keepDraftParty.current = false;
+        setParty((saved) => mergeDraftParty(saved, m));
+        setEmirate((prev) => prev || m.vat_emirate || "");
         return;
       }
       setParty(m);
@@ -127,6 +133,9 @@ export default function QuotationForm() {
         setLines(await txn.repriceLines({ party: m, lines, transactionDate: txDate, currency: m.currency, conversionRate: rate, customer }));
       }
     });
+    return () => {
+      partyFetchId.current += 1;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customer]);
 
@@ -151,23 +160,22 @@ export default function QuotationForm() {
       transaction_date: txDate,
       valid_till: validTill,
       company,
-      vat_emirate: emirate || undefined,
+      vat_emirate: emirate,
+      company_address: party.company_address || undefined,
       taxes_and_charges: taxTemplate || undefined,
       payment_terms_template: paymentTerms || undefined,
-      additional_discount_percentage: discountPct || undefined,
+      ...orderDiscountFields(discountPct, discountOn),
       tc_name: tcName || undefined,
       selling_price_list: party.selling_price_list,
       currency: party.currency || session.currency,
       conversion_rate: conversionRate,
-      items: lines.filter((l) => l.item_code).map((l) => ({
-        item_code: l.item_code, qty: l.qty, rate: l.rate, uom: l.uom,
-      })),
+      items: lines.filter((l) => l.item_code).map((l) => linePayload(l)),
     };
-  }, [customer, txDate, validTill, company, emirate, taxTemplate, paymentTerms, discountPct, tcName, party, session.currency, lines]);
+  }, [customer, txDate, validTill, company, emirate, taxTemplate, paymentTerms, discountPct, discountOn, tcName, party, session.currency, conversionRate, lines]);
 
   const { preview, previewing } = useTotalsPreview(
     buildPreviewDoc,
-    [customer, txDate, taxTemplate, emirate, discountPct, paymentTerms, lines],
+    [customer, txDate, taxTemplate, emirate, discountPct, discountOn, paymentTerms, lines],
     txn.previewTotals,
   );
 
@@ -195,10 +203,11 @@ export default function QuotationForm() {
         transaction_date: txDate,
         valid_till: validTill,
         company,
-        vat_emirate: emirate || undefined,
+        vat_emirate: emirate,
+        company_address: party.company_address || undefined,
         taxes_and_charges: taxTemplate || undefined,
         payment_terms_template: paymentTerms || undefined,
-        additional_discount_percentage: discountPct || undefined,
+        ...orderDiscountFields(discountPct, discountOn),
         tc_name: tcName || undefined,
         payment_schedule: schedule.length
           ? schedule.map((r) => ({
@@ -256,9 +265,19 @@ export default function QuotationForm() {
               <h2 style={{ margin: "0 0 13px", fontSize: 13.5, fontWeight: 600 }}>
                 {t("quot.summary")}{previewing ? "…" : ""}
               </h2>
-              <SumRow k={t("sod.net")} v={money(showNet)} />
-              <SumRow k={t("sod.vat")} v={money(showVat)} />
-              <SumRow k={t("sod.grand")} v={money(showGrand)} cls="rule total" />
+              <TxnTotals
+                itemsTotal={preview?.total ?? net}
+                productDiscount={productDiscountTotal(lines)}
+                orderDiscount={preview?.discount_amount}
+                orderDiscountPercent={discountPct}
+                discountOn={discountOn}
+                net={showNet}
+                vat={showVat}
+                grand={showGrand}
+                netLabel={t("sod.net")}
+                vatLabel={t("sod.vat")}
+                grandLabel={t("sod.grand")}
+              />
             </Card>
             <ReadinessCard checks={checks} title={t("soc.ready")} caption={t("soc.readyCap")} />
           </>
@@ -296,10 +315,12 @@ export default function QuotationForm() {
                 {(terms.data ?? []).map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
               </select>
             </Field>
-            <Field label={t("txn.discountPct")}>
-              <input className="ctl" type="number" min={0} max={100} step={0.01} value={discountPct}
-                onChange={(e) => setDiscountPct(parseNum(e.target.value))} />
-            </Field>
+            <OrderDiscountFields
+              percent={discountPct}
+              basis={discountOn}
+              onPercent={setDiscountPct}
+              onBasis={setDiscountOn}
+            />
             <Field label={t("txn.terms")}>
               <select className="ctl" value={tcName} onChange={(e) => setTcName(e.target.value)}>
                 <option value="" />
@@ -343,7 +364,13 @@ export default function QuotationForm() {
                 key: "rate", label: t("sod.col.rate"), numeric: true,
                 render: (l, i) => (
                   <input className="ctl mini nn" style={{ width: 104 }} value={l.rate}
-                    onChange={(e) => setLines((ls) => ls.map((x, j) => j === i ? { ...x, rate: parseNum(e.target.value) } : x))} />
+                    onChange={(e) => setLines((ls) => ls.map((x, j) => j === i ? applyLineRate(x, parseNum(e.target.value)) : x))} />
+                ),
+              },
+              {
+                key: "discount", label: t("txn.lineDiscount"), numeric: true,
+                render: (l, i) => (
+                  <LineDiscountInput line={l} onChange={(next) => setLines((ls) => ls.map((x, j) => j === i ? next : x))} />
                 ),
               },
               {

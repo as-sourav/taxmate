@@ -10,10 +10,10 @@ import { useDoc, useDocList, useInsert, useSave } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canSubmitSales } from "../../lib/roles";
 import { money, parseNum, toIsoDate } from "../../lib/format";
-import { linePayload, stampItemDetails, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type PartyDetails, type TxnLine } from "../../lib/txn";
-import { ExchangeRateField, LineTrack, PartyFields, PaymentScheduleTable } from "../../components/txnFields";
+import { applyLineRate, linePayload, orderDiscountFields, productDiscountTotal, readDiscountBasis, stampItemDetails, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type DiscountBasis, type PartyDetails, type TxnLine } from "../../lib/txn";
+import { ExchangeRateField, LineDiscountInput, LineTrack, OrderDiscountFields, PartyFields, PaymentScheduleTable, TxnTotals } from "../../components/txnFields";
 import { t } from "../../i18n/strings";
-import { Card, ErrorBox, Field, PageHead, SumRow } from "../../components/ui";
+import { Card, ErrorBox, Field, PageHead } from "../../components/ui";
 import { FormActions, FormLayout, ReadinessCard } from "../../components/form";
 import LinkField from "../../components/LinkField";
 import LineItems, { type LineField } from "../../components/LineItems";
@@ -41,6 +41,7 @@ export default function PurchaseOrderForm() {
   const [taxTemplate, setTaxTemplate] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("");
   const [discountPct, setDiscountPct] = useState(0);
+  const [discountOn, setDiscountOn] = useState<DiscountBasis>("Net Total");
   const [warehouse, setWarehouse] = useState("");
   const [party, setParty] = useState<PartyDetails>({});
   const [conversionRate, setConversionRate] = useState(1);
@@ -49,7 +50,7 @@ export default function PurchaseOrderForm() {
 
   type PoDoc = {
     name: string; supplier?: string; transaction_date?: string; schedule_date?: string;
-    taxes_and_charges?: string; payment_terms_template?: string; additional_discount_percentage?: number; set_warehouse?: string; docstatus?: number; items?: TxnLine[];
+    taxes_and_charges?: string; payment_terms_template?: string; additional_discount_percentage?: number; apply_discount_on?: string; set_warehouse?: string; docstatus?: number; items?: TxnLine[];
   };
   const existing = useDoc<PoDoc>(DT.purchaseOrder, isEdit ? editName : undefined, isEdit ? editName : null);
   const [loaded, setLoaded] = useState(false);
@@ -63,10 +64,13 @@ export default function PurchaseOrderForm() {
       setTaxTemplate(d.taxes_and_charges ?? "");
       setPaymentTerms(d.payment_terms_template ?? "");
       setDiscountPct(Number(d.additional_discount_percentage || 0));
+      setDiscountOn(readDiscountBasis(d.apply_discount_on, Number(d.additional_discount_percentage) > 0));
       setWarehouse(d.set_warehouse ?? "");
       setLines((d.items ?? []).map((l) => ({
         item_code: l.item_code ?? "", item_name: l.item_name, uom: l.uom,
         qty: l.qty ?? 1, rate: l.rate ?? 0,
+        price_list_rate: l.price_list_rate, discount_percentage: l.discount_percentage,
+        discount_amount: l.discount_amount,
       })));
       setSkipReprice(true);
       setLoaded(true);
@@ -129,6 +133,9 @@ export default function PurchaseOrderForm() {
       description: l.description ? String(l.description) : undefined,
       qty: Number(l.qty) || 1,
       rate: Number(l.rate) || 0,
+      price_list_rate: Number(l.price_list_rate) || undefined,
+      discount_percentage: Number(l.discount_percentage) || undefined,
+      discount_amount: Number(l.discount_amount) || undefined,
       uom: l.uom ? String(l.uom) : undefined,
       warehouse: l.warehouse ? String(l.warehouse) : undefined,
       expense_account: l.expense_account ? String(l.expense_account) : undefined,
@@ -162,15 +169,17 @@ export default function PurchaseOrderForm() {
       buying_price_list: party.buying_price_list,
       currency: party.currency || session.currency,
       conversion_rate: conversionRate,
+      ...orderDiscountFields(discountPct, discountOn),
       items: lines.filter((l) => l.item_code).map((l) => ({
-        item_code: l.item_code, qty: l.qty, rate: l.rate, uom: l.uom, schedule_date: requiredBy,
+        ...linePayload(l),
+        schedule_date: l.schedule_date || requiredBy,
       })),
     };
-  }, [supplier, orderDate, requiredBy, company, taxTemplate, party, session.currency, lines]);
+  }, [supplier, orderDate, requiredBy, company, taxTemplate, party, session.currency, conversionRate, discountPct, discountOn, lines]);
 
   const { preview, previewing } = useTotalsPreview(
     buildPreviewDoc,
-    [supplier, orderDate, taxTemplate, lines],
+    [supplier, orderDate, taxTemplate, discountPct, discountOn, lines],
     txn.previewTotals,
   );
 
@@ -203,7 +212,7 @@ export default function PurchaseOrderForm() {
       supplier_address: party.supplier_address,
       buying_price_list: party.buying_price_list,
       payment_terms_template: paymentTerms || undefined,
-      additional_discount_percentage: discountPct || undefined,
+      ...orderDiscountFields(discountPct, discountOn),
       set_warehouse: warehouse || undefined,
       currency: party.currency || session.currency,
       conversion_rate: conversionRate,
@@ -258,9 +267,19 @@ export default function PurchaseOrderForm() {
               <h2 style={{ margin: "0 0 13px", fontSize: 13.5, fontWeight: 600 }}>
                 {t("soc.summary")}{previewing ? "…" : ""}
               </h2>
-              <SumRow k={t("sod.net")} v={money(showNet)} />
-              <SumRow k={t("sod.vat")} v={money(showVat)} />
-              <SumRow k={t("sod.grand")} v={money(showGrand)} cls="rule total" />
+              <TxnTotals
+                itemsTotal={preview?.total ?? net}
+                productDiscount={productDiscountTotal(lines)}
+                orderDiscount={preview?.discount_amount}
+                orderDiscountPercent={discountPct}
+                discountOn={discountOn}
+                net={showNet}
+                vat={showVat}
+                grand={showGrand}
+                netLabel={t("sod.net")}
+                vatLabel={t("sod.vat")}
+                grandLabel={t("sod.grand")}
+              />
             </Card>
             <ReadinessCard
               checks={checks.map(([label, ok]) => ({ label, ok }))}
@@ -300,10 +319,12 @@ export default function PurchaseOrderForm() {
                 {(templates.data ?? []).map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
               </select>
             </Field>
-            <Field label={t("txn.discountPct")}>
-              <input className="ctl" type="number" min={0} max={100} step={0.01} value={discountPct}
-                onChange={(e) => setDiscountPct(parseNum(e.target.value))} />
-            </Field>
+            <OrderDiscountFields
+              percent={discountPct}
+              basis={discountOn}
+              onPercent={setDiscountPct}
+              onBasis={setDiscountOn}
+            />
             <Field label={t("dn.warehouse")}>
               <LinkField doctype={DT.warehouse} value={warehouse} onChange={setWarehouse}
                 filters={company ? [["company", "=", company], ["is_group", "=", 0]] : undefined} />
@@ -351,7 +372,16 @@ export default function PurchaseOrderForm() {
                 key: "rate", label: t("sod.col.rate"), numeric: true,
                 render: (l, i) => (
                   <input className="ctl mini nn" style={{ width: 104 }} value={l.rate}
-                    onChange={(e) => setLines((ls) => ls.map((x, j) => j === i ? { ...x, rate: parseNum(e.target.value) } : x))} />
+                    onChange={(e) => setLines((ls) => ls.map((x, j) => j === i ? applyLineRate(x, parseNum(e.target.value)) : x))} />
+                ),
+              },
+              {
+                key: "discount", label: t("txn.lineDiscount"), numeric: true,
+                render: (l, i) => (
+                  <LineDiscountInput
+                    line={l}
+                    onChange={(next) => setLines((ls) => ls.map((x, j) => j === i ? next : x))}
+                  />
                 ),
               },
               {

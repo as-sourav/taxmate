@@ -1,9 +1,17 @@
+import { useId, type ReactNode } from "react";
+
 import LinkField from "./LinkField";
-import { Field } from "./ui";
+import { Field, SumRow } from "./ui";
 import { DT } from "../lib/frappe";
 import { money, parseNum } from "../lib/format";
 import { t } from "../i18n/strings";
-import type { PartyDetails, TxnLine, TxnSide } from "../lib/txn";
+import {
+  applyLineDiscountPct,
+  type DiscountBasis,
+  type PartyDetails,
+  type TxnLine,
+  type TxnSide,
+} from "../lib/txn";
 
 function partyFilters(side: TxnSide, partyName: string) {
   const linkDoctype = side === "buying" ? "Supplier" : "Customer";
@@ -185,6 +193,189 @@ export function PaymentScheduleTable({ rows }: { rows: ScheduleRow[] }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** "Order discount, 10% before VAT" — the basis is part of the label, not a color. */
+export function orderDiscountLabel(percent?: number, basis?: string): string {
+  const where = basis === "Grand Total" ? t("txn.afterVat") : t("txn.beforeVat");
+  const pct = Number(percent) || 0;
+  const pctBit = pct > 0 ? `${pct}% ` : "";
+  return `${t("txn.orderDiscount")}, ${pctBit}${where}`;
+}
+
+export function formatLineDiscount(line: { discount_percentage?: number; discount_amount?: number }): string {
+  const pct = Number(line.discount_percentage) || 0;
+  if (pct > 0) {
+    const shown = Number.isInteger(pct) ? String(pct) : String(Math.round(pct * 100) / 100);
+    return `${shown}%`;
+  }
+  const amt = Number(line.discount_amount) || 0;
+  if (amt > 0) return money(amt);
+  return "—";
+}
+
+/**
+ * Order-level discount. The percent is separate from a line discount, and the
+ * select says whether VAT is calculated before or after it.
+ */
+export function OrderDiscountFields({
+  percent,
+  basis,
+  onPercent,
+  onBasis,
+  disabled,
+}: {
+  percent: number;
+  basis: DiscountBasis;
+  onPercent: (n: number) => void;
+  onBasis: (basis: DiscountBasis) => void;
+  disabled?: boolean;
+}) {
+  const pctId = useId();
+  const basisId = useId();
+  return (
+    <>
+      <Field label={t("txn.orderDiscount")} hint={t("txn.discountHint")} htmlFor={pctId}>
+        <input
+          id={pctId}
+          className="ctl"
+          type="number"
+          min={0}
+          max={100}
+          step={0.01}
+          inputMode="decimal"
+          value={percent}
+          disabled={disabled}
+          onChange={(e) => onPercent(Math.min(100, Math.max(0, parseNum(e.target.value))))}
+        />
+      </Field>
+      <Field label={t("txn.discountBasis")} htmlFor={basisId}>
+        <select
+          id={basisId}
+          className="ctl"
+          value={basis}
+          disabled={disabled}
+          onChange={(e) => onBasis(e.target.value === "Grand Total" ? "Grand Total" : "Net Total")}
+        >
+          <option value="Net Total">{t("txn.discountBeforeVat")}</option>
+          <option value="Grand Total">{t("txn.discountAfterVat")}</option>
+        </select>
+      </Field>
+    </>
+  );
+}
+
+/** Percent off this product's list rate. */
+export function LineDiscountInput({
+  line,
+  onChange,
+  disabled,
+}: {
+  line: TxnLine;
+  onChange: (next: TxnLine) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <input
+      className="ctl mini nn"
+      style={{ width: 72 }}
+      type="number"
+      min={0}
+      max={100}
+      step={0.01}
+      inputMode="decimal"
+      aria-label={t("txn.lineDiscount")}
+      value={line.discount_percentage ?? 0}
+      disabled={disabled}
+      onChange={(e) => onChange(applyLineDiscountPct(line, parseNum(e.target.value)))}
+    />
+  );
+}
+
+/**
+ * Net, VAT, and grand total, with product and order discounts named when they exist.
+ * Rows stay in the order the figures add up: list, product discount, items, order discount, net, VAT, grand.
+ */
+export function TxnTotals({
+  currency,
+  itemsTotal,
+  productDiscount,
+  orderDiscount,
+  orderDiscountPercent,
+  discountOn,
+  net,
+  vat,
+  grand,
+  netLabel,
+  vatLabel,
+  grandLabel,
+  children,
+}: {
+  currency?: string;
+  itemsTotal?: number;
+  productDiscount?: number;
+  orderDiscount?: number;
+  orderDiscountPercent?: number;
+  discountOn?: string;
+  net?: number;
+  vat?: number;
+  grand?: number;
+  netLabel: string;
+  vatLabel: string;
+  grandLabel: string;
+  children?: ReactNode;
+}) {
+  const product = Number(productDiscount) || 0;
+  const order = Number(orderDiscount) || 0;
+  const showProduct = product > 0.004;
+  const showOrder = order > 0.004;
+  const items = Number(itemsTotal ?? net) || 0;
+  const netAmount = Number(net) || 0;
+  // A Grand Total percent is taken off the bill after VAT. ERPNext then
+  // lowers the item net by only the pre-VAT share and recomputes VAT, so
+  // discount_amount is larger than items − net. The row uses the share that
+  // sits between items and net; the note keeps the full bill reduction.
+  const itemShare = itemsTotal == null ? order : items - netAmount;
+  const onGrand = discountOn === "Grand Total";
+  const splitGrand =
+    onGrand && itemsTotal != null && Math.abs(itemShare) > 0.004 && Math.abs(itemShare - order) > 0.004;
+  const rowAmount = splitGrand ? Math.abs(itemShare) : Math.abs(order);
+  const billSaving = splitGrand ? Math.abs(order) : 0;
+  return (
+    <>
+      {showProduct && (
+        <>
+          <SumRow k={t("txn.listTotal")} v={money(items + product)} currency={currency} />
+          <SumRow k={t("txn.productDiscounts")} v={`−${money(product)}`} currency={currency} cls="discount" />
+        </>
+      )}
+      {showOrder && (
+        <>
+          <SumRow k={t("txn.itemsTotal")} v={money(items)} currency={currency} />
+          <SumRow
+            k={orderDiscountLabel(orderDiscountPercent, discountOn)}
+            v={`−${money(rowAmount)}`}
+            currency={currency}
+            cls="discount"
+          />
+          {billSaving > 0.004 && (
+            <div className="srow discount-note">
+              <span className="k">
+                {t("txn.lessOnBill").replace(
+                  "{amount}",
+                  `${currency ? `${currency} ` : ""}${money(billSaving)}`,
+                )}
+              </span>
+            </div>
+          )}
+        </>
+      )}
+      <SumRow k={netLabel} v={money(net)} currency={currency} />
+      <SumRow k={vatLabel} v={money(vat)} currency={currency} />
+      <SumRow k={grandLabel} v={money(grand)} currency={currency} cls="rule total" />
+      {children}
+    </>
   );
 }
 
