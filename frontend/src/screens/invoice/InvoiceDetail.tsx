@@ -8,6 +8,8 @@ import { canCancelSales, canSubmitSales, eInvoiceLocked } from "../../lib/roles"
 import { date, datetime, money, qty } from "../../lib/format";
 import { EINVOICE_CHIP, INV_PILL_CLASS, invoiceUiStatus, isInvoiceOverdue } from "../../lib/status";
 import { t } from "../../i18n/strings";
+import { TxnTotals } from "../../components/txnFields";
+import { productDiscountTotal, readDiscountBasis } from "../../lib/txn";
 import { Card, Empty, ErrorBox, Loading, PageHead, Pill, ReadRow, SumRow } from "../../components/ui";
 import { FormLayout } from "../../components/form";
 import DetailActions from "../../components/DetailActions";
@@ -22,6 +24,7 @@ const PIPE_FAILED = ["Rejected", "Failed"];
 type Line = {
   name?: string; item_code?: string; item_name?: string; qty?: number; uom?: string;
   rate?: number; amount?: number; uae_item_type?: string; hs_code?: string; sac_code?: string;
+  price_list_rate?: number; discount_percentage?: number; discount_amount?: number;
 };
 
 type Doc = {
@@ -29,7 +32,8 @@ type Doc = {
   posting_date?: string; due_date?: string; po_no?: string; company?: string;
   vat_emirate?: string; taxes_and_charges?: string; tax_id?: string; company_trn?: string;
   payment_terms_template?: string; selling_price_list?: string;
-  net_total?: number; total_taxes_and_charges?: number; grand_total?: number;
+  total?: number; net_total?: number; total_taxes_and_charges?: number; grand_total?: number;
+  discount_amount?: number; additional_discount_percentage?: number; apply_discount_on?: string;
   outstanding_amount?: number; currency?: string; total_advance?: number;
   allocate_advances_automatically?: number; advances?: unknown[];
   docstatus?: 0 | 1 | 2; status?: string;
@@ -284,9 +288,20 @@ export default function InvoiceDetail() {
         <>
           <Card bodyClass="cbody">
             <h2 style={{ margin: "0 0 13px", fontSize: 13.5, fontWeight: 600 }}>{t("inv.totals")}</h2>
-            <SumRow k={t("sod.net")} v={money(data.net_total)} currency={cur} />
-            <SumRow k={t("sod.vat")} v={money(data.total_taxes_and_charges)} currency={cur} />
-            <SumRow k={t("sod.grand")} v={money(grand)} cls="rule total" currency={cur} />
+            <TxnTotals
+            currency={cur}
+              itemsTotal={data.total}
+              productDiscount={productDiscountTotal(data.items ?? [])}
+              orderDiscount={data.discount_amount}
+              orderDiscountPercent={data.additional_discount_percentage}
+              discountOn={readDiscountBasis(data.apply_discount_on, Number(data.discount_amount) > 0)}
+              net={data.net_total}
+              vat={data.total_taxes_and_charges}
+              grand={grand}
+              netLabel={t("sod.net")}
+              vatLabel={t("sod.vat")}
+              grandLabel={t("sod.grand")}
+            />
             {submitted && <SumRow k={t("inv.pay.received")} v={money(received)} cls="rule" currency={cur} />}
             {submitted && (
               <SumRow k={t("inv.col.outstanding")} v={money(outstanding)} cls="due" currency={cur} />

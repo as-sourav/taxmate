@@ -2,8 +2,8 @@
  * Sales Order create/edit. Catalog txn helpers + get-items-from.
  * Routes: /orders/new, /orders/:name/edit
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
@@ -42,6 +42,7 @@ type SoDoc = {
 
 export default function SalesOrderCreate() {
   const nav = useNavigate();
+  const location = useLocation();
   const session = useSession();
   const { name: editName } = useParams<{ name?: string }>();
   const isEdit = !!editName;
@@ -104,7 +105,20 @@ export default function SalesOrderCreate() {
     void txn.fetchParty(customer, orderDate).then(async (m) => {
       if (!m) return;
       if (skipReprice) {
+        // Mapped Quotation→SO already has lines/rates. Still need party TRN /
+        // addresses; do not reprice or overwrite Place of Supply / tax.
         setSkipReprice(false);
+        setParty((saved) => ({
+          ...m,
+          customer_address: saved.customer_address ?? m.customer_address,
+          shipping_address_name: saved.shipping_address_name ?? m.shipping_address_name,
+          contact_person: saved.contact_person ?? m.contact_person,
+          company_address: saved.company_address ?? m.company_address,
+          selling_price_list: saved.selling_price_list ?? m.selling_price_list,
+          currency: saved.currency ?? m.currency,
+        }));
+        setEmirate((prev) => prev || m.vat_emirate || "");
+        setTaxTemplate((prev) => prev || m.taxes_and_charges || "");
         return;
       }
       setParty(m);
@@ -148,11 +162,26 @@ export default function SalesOrderCreate() {
   function applyMapped(mapped: Record<string, unknown>) {
     setSkipReprice(true);
     if (mapped.customer) setCustomer(String(mapped.customer));
-    if (mapped.transaction_date) setOrderDate(String(mapped.transaction_date));
-    if (mapped.delivery_date) setDeliveryDate(String(mapped.delivery_date));
+    if (mapped.transaction_date) setOrderDate(String(mapped.transaction_date).slice(0, 10));
+    // Quotation has no delivery_date (ERPNext quotation.json). Desk opens an
+    // unsaved SO via open_mapped_doc; we prefill so validate_delivery_date passes.
+    setDeliveryDate(mapped.delivery_date ? String(mapped.delivery_date).slice(0, 10) : plus(21));
     if (mapped.vat_emirate) setEmirate(String(mapped.vat_emirate));
     if (mapped.taxes_and_charges) setTaxTemplate(String(mapped.taxes_and_charges));
     if (mapped.po_no) setPoNo(String(mapped.po_no));
+    if (mapped.payment_terms_template) setPaymentTerms(String(mapped.payment_terms_template));
+    if (mapped.conversion_rate != null && mapped.conversion_rate !== "") {
+      setConversionRate(Number(mapped.conversion_rate) || 1);
+    }
+    setParty({
+      customer_address: mapped.customer_address ? String(mapped.customer_address) : undefined,
+      shipping_address_name: mapped.shipping_address_name ? String(mapped.shipping_address_name) : undefined,
+      contact_person: mapped.contact_person ? String(mapped.contact_person) : undefined,
+      company_address: mapped.company_address ? String(mapped.company_address) : undefined,
+      selling_price_list: mapped.selling_price_list ? String(mapped.selling_price_list) : undefined,
+      currency: mapped.currency ? String(mapped.currency) : undefined,
+      tax_id: mapped.tax_id ? String(mapped.tax_id) : undefined,
+    });
     const items = (mapped.items as TxnLine[] | undefined) ?? [];
     setLines(
       items.map((l) => ({
@@ -164,6 +193,18 @@ export default function SalesOrderCreate() {
       })),
     );
   }
+
+  const mappedOnce = useRef(false);
+  useEffect(() => {
+    if (isEdit || mappedOnce.current) return;
+    const mapped = (location.state as { mapped?: Record<string, unknown> } | null)?.mapped;
+    if (!mapped) return;
+    mappedOnce.current = true;
+    applyMapped(mapped);
+    // Drop one-shot nav state so refresh does not re-apply a stale map.
+    nav(location.pathname, { replace: true, state: {} });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEdit, location.state]);
 
   const buildPreviewDoc = useCallback(() => {
     if (!customer || !lines.some((l) => l.item_code)) return null;

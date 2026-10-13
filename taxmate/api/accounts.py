@@ -512,7 +512,11 @@ def preview_taxes_and_totals(doc: dict | str | None = None):
 	preview.calculate_taxes_and_totals()
 
 	return {
+		"total": preview.get("total"),
 		"net_total": preview.get("net_total"),
+		"discount_amount": preview.get("discount_amount"),
+		"additional_discount_percentage": preview.get("additional_discount_percentage"),
+		"apply_discount_on": preview.get("apply_discount_on"),
 		"total_taxes_and_charges": preview.get("total_taxes_and_charges"),
 		"grand_total": preview.get("grand_total"),
 		"rounded_total": preview.get("rounded_total"),

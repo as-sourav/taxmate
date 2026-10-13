@@ -12,6 +12,8 @@ import { canCancelSales, canSubmitSales } from "../../lib/roles";
 import { date, money, pct, qty } from "../../lib/format";
 import { SO_PILL_CLASS, isLate, toUiStatus } from "../../lib/status";
 import { t } from "../../i18n/strings";
+import { TxnTotals } from "../../components/txnFields";
+import { productDiscountTotal, readDiscountBasis } from "../../lib/txn";
 import { Card, ErrorBox, Loading, MiniBar, PageHead, Pill, ReadRow, SumRow } from "../../components/ui";
 import { FormLayout } from "../../components/form";
 import DetailActions from "../../components/DetailActions";
@@ -186,9 +188,19 @@ export default function SalesOrderDetail() {
         <>
           <Card bodyClass="cbody">
             <h2 style={{ margin: "0 0 13px", fontSize: 13.5, fontWeight: 600 }}>{t("sod.value")}</h2>
-            <SumRow k={t("sod.net")} v={money(net)} />
-            <SumRow k={t("sod.vat")} v={money(vat)} />
-            <SumRow k={t("sod.grand")} v={money(grand)} cls="rule total" />
+            <TxnTotals
+              itemsTotal={data.total}
+              productDiscount={productDiscountTotal(data.items ?? [])}
+              orderDiscount={data.discount_amount}
+              orderDiscountPercent={data.additional_discount_percentage}
+              discountOn={readDiscountBasis(data.apply_discount_on, Number(data.discount_amount) > 0)}
+              net={net}
+              vat={vat}
+              grand={grand}
+              netLabel={t("sod.net")}
+              vatLabel={t("sod.vat")}
+              grandLabel={t("sod.grand")}
+            />
             {advance > 0 && <SumRow k={t("sod.advance")} v={money(advance)} cls="rule" />}
           </Card>
 

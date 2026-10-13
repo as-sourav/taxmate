@@ -11,14 +11,14 @@ import { useDoc, useDocList, useInsert, useSave } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canSubmitSales, canWrite } from "../../lib/roles";
 import { money, parseNum, toIsoDate } from "../../lib/format";
-import { linePayload, stampItemDetails, useItemQtyCheck, useTotalsPreview, useTransactionRpc, type PartyDetails, type TxnLine } from "../../lib/txn";
-import { ExchangeRateField, LineTrack, PartyFields } from "../../components/txnFields";
+import { applyLineRate, linePayload, orderDiscountFields, productDiscountTotal, readDiscountBasis, stampItemDetails, useItemQtyCheck, useTotalsPreview, useTransactionRpc, type DiscountBasis, type PartyDetails, type TxnLine } from "../../lib/txn";
+import { ExchangeRateField, LineDiscountInput, LineTrack, OrderDiscountFields, PartyFields, TxnTotals } from "../../components/txnFields";
 import { UAE_EMIRATES } from "../../types/uae";
 import { t } from "../../i18n/strings";
 import LinkField from "../../components/LinkField";
 import LineItems, { type LineField } from "../../components/LineItems";
 import SourceDocPicker from "../../components/SourceDocPicker";
-import { Card, ErrorBox, Field, Loading, PageHead, SumRow } from "../../components/ui";
+import { Card, ErrorBox, Field, Loading, PageHead } from "../../components/ui";
 import { FormActions, FormLayout, ReadinessCard } from "../../components/form";
 
 type Line = TxnLine & { warehouse?: string; batch_no?: string; serial_no?: string };
@@ -42,6 +42,7 @@ export default function DeliveryNoteForm() {
     taxes_and_charges?: string;
     payment_terms_template?: string;
     additional_discount_percentage?: number;
+    apply_discount_on?: string;
     tc_name?: string;
     vat_emirate?: string;
     docstatus?: number;
@@ -54,6 +55,7 @@ export default function DeliveryNoteForm() {
   const [taxTemplate, setTaxTemplate] = useState("");
   const [paymentTerms, setPaymentTerms] = useState("");
   const [discountPct, setDiscountPct] = useState(0);
+  const [discountOn, setDiscountOn] = useState<DiscountBasis>("Net Total");
   const [tcName, setTcName] = useState("");
   const [emirate, setEmirate] = useState("");
   const [party, setParty] = useState<PartyDetails>({});
@@ -82,6 +84,7 @@ export default function DeliveryNoteForm() {
     setTaxTemplate(d.taxes_and_charges || "");
     setPaymentTerms(d.payment_terms_template || "");
     setDiscountPct(Number(d.additional_discount_percentage || 0));
+    setDiscountOn(readDiscountBasis(d.apply_discount_on, Number(d.additional_discount_percentage) > 0));
     setTcName(d.tc_name || "");
     setEmirate(d.vat_emirate || "");
     setLines(
@@ -92,6 +95,9 @@ export default function DeliveryNoteForm() {
             uom: row.uom,
             qty: Number(row.qty) || 1,
             rate: Number(row.rate) || 0,
+            price_list_rate: row.price_list_rate,
+            discount_percentage: row.discount_percentage,
+            discount_amount: row.discount_amount,
             warehouse: row.warehouse || d.set_warehouse || "",
             batch_no: row.batch_no || "",
             serial_no: row.serial_no || "",
@@ -169,22 +175,22 @@ export default function DeliveryNoteForm() {
       vat_emirate: emirate || undefined,
       taxes_and_charges: taxTemplate || undefined,
       payment_terms_template: paymentTerms || undefined,
-      additional_discount_percentage: discountPct || undefined,
+      ...orderDiscountFields(discountPct, discountOn),
       tc_name: tcName || undefined,
       customer_address: party.customer_address,
       selling_price_list: party.selling_price_list,
       currency: party.currency || session.currency,
       conversion_rate: conversionRate,
       items: lines.filter((l) => l.item_code).map((l) => ({
-        item_code: l.item_code, qty: l.qty, rate: l.rate, uom: l.uom,
+        ...linePayload(l),
         warehouse: l.warehouse || warehouse,
       })),
     };
-  }, [customer, postingDate, warehouse, company, emirate, taxTemplate, party, session.currency, lines]);
+  }, [customer, postingDate, warehouse, company, emirate, taxTemplate, discountPct, discountOn, party, session.currency, lines]);
 
   const { preview, previewing } = useTotalsPreview(
     buildPreviewDoc,
-    [customer, postingDate, taxTemplate, emirate, discountPct, paymentTerms, lines],
+    [customer, postingDate, taxTemplate, emirate, discountPct, discountOn, paymentTerms, lines],
     txn.previewTotals,
   );
 
@@ -220,7 +226,7 @@ export default function DeliveryNoteForm() {
       set_warehouse: warehouse,
       taxes_and_charges: taxTemplate || undefined,
       payment_terms_template: paymentTerms || undefined,
-      additional_discount_percentage: discountPct || undefined,
+      ...orderDiscountFields(discountPct, discountOn),
       tc_name: tcName || undefined,
       vat_emirate: emirate || undefined,
       customer_address: party.customer_address,
@@ -284,9 +290,19 @@ export default function DeliveryNoteForm() {
               <h2 style={{ margin: "0 0 13px", fontSize: 13.5, fontWeight: 600 }}>
                 {t("dn.summary")}{previewing ? "…" : ""}
               </h2>
-              <SumRow k={t("dn.net")} v={money(showNet)} />
-              <SumRow k={t("sod.vat")} v={money(showVat)} />
-              <SumRow k={t("sod.grand")} v={money(showGrand)} cls="rule total" />
+              <TxnTotals
+                itemsTotal={preview?.total ?? net}
+                productDiscount={productDiscountTotal(lines)}
+                orderDiscount={preview?.discount_amount}
+                orderDiscountPercent={discountPct}
+                discountOn={discountOn}
+                net={showNet}
+                vat={showVat}
+                grand={showGrand}
+                netLabel={t("dn.net")}
+                vatLabel={t("sod.vat")}
+                grandLabel={t("sod.grand")}
+              />
             </Card>
             <ReadinessCard
               checks={checks.map(([label, ok]) => ({ label, ok }))}
@@ -340,10 +356,12 @@ export default function DeliveryNoteForm() {
                 {(terms.data ?? []).map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
               </select>
             </Field>
-            <Field label={t("txn.discountPct")}>
-              <input className="ctl" type="number" min={0} max={100} step={0.01} value={discountPct}
-                onChange={(e) => setDiscountPct(parseNum(e.target.value))} />
-            </Field>
+            <OrderDiscountFields
+              percent={discountPct}
+              basis={discountOn}
+              onPercent={setDiscountPct}
+              onBasis={setDiscountOn}
+            />
             <Field label={t("txn.terms")}>
               <select className="ctl" value={tcName} onChange={(e) => setTcName(e.target.value)}>
                 <option value="" />
@@ -410,8 +428,14 @@ export default function DeliveryNoteForm() {
                 key: "rate", label: t("dn.rate"), numeric: true,
                 render: (l, i) => (
                   <input className="ctl mini nn" style={{ width: 104 }} value={l.rate}
-                    onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, rate: parseNum(e.target.value) } : x)))}
+                    onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? applyLineRate(x, parseNum(e.target.value)) : x)))}
                     aria-label={t("dn.rate")} />
+                ),
+              },
+              {
+                key: "discount", label: t("txn.lineDiscount"), numeric: true,
+                render: (l, i) => (
+                  <LineDiscountInput line={l} onChange={(next) => setLines((ls) => ls.map((x, j) => j === i ? next : x))} />
                 ),
               },
               {
