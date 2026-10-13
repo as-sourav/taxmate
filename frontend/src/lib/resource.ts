@@ -2,10 +2,10 @@
  * Catalog CRUD hooks. Screens must not call /api/resource or Desk methods.
  * These wrap taxmate.api.resource.* listed in get_catalog().
  */
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk";
 
-import { METHOD } from "./frappe";
+import { DT, METHOD } from "./frappe";
 import { useSession } from "./session";
 import { hardReload } from "../mobile/platform";
 
@@ -55,6 +55,28 @@ export function useDocList<T>(doctype: string, opts: ListOpts = {}, key?: string
     isLoading: call.isLoading,
     mutate: call.mutate,
   };
+}
+
+/** City from the linked Address. primary_address is an HTML display and is not the city. */
+export function useAddressCities(names: Array<string | undefined>) {
+  const unique = [...new Set(names.filter((name): name is string => !!name))].sort();
+  const list = useDocList<{ name: string; city?: string }>(
+    DT.address,
+    {
+      fields: ["name", "city"],
+      filters: [["name", "in", unique.length ? unique : ["__none__"]]],
+      limit: Math.max(unique.length, 1),
+    },
+    unique.length ? `address-cities:${unique.join("\n")}` : null,
+  );
+  return useMemo(() => {
+    const cities = new Map<string, string>();
+    for (const row of list.data ?? []) {
+      const city = (row.city || "").replace(/<[^>]*>/g, "").trim();
+      if (row.name && city) cities.set(row.name, city);
+    }
+    return cities;
+  }, [list.data]);
 }
 
 export function useDoc<T>(

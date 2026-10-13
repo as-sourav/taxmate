@@ -1,7 +1,7 @@
 import {useMemo, useCallback} from "react";
 import { useNavigate } from "react-router-dom";
 import type { Filter } from "frappe-react-sdk";
-import { useDocList } from "../../lib/resource";
+import { useAddressCities, useDocList } from "../../lib/resource";
 
 import { DT } from "../../lib/frappe";
 import { useDraftDelete } from "../../lib/useDraftDelete";
@@ -16,7 +16,7 @@ import { FilterBar, SearchFilter } from "../../components/filters";
 import { IfCanWrite } from "../../components/RoleGate";
 
 const PAGE = 20;
-type Row = { name: string; customer_name?: string; tax_id?: string; customer_group?: string; primary_address?: string };
+type Row = { name: string; customer_name?: string; tax_id?: string; customer_group?: string; customer_primary_address?: string };
 
 export default function CustomerList() {
   const session = useSession();
@@ -31,7 +31,7 @@ export default function CustomerList() {
   }, [q]);
 
   const list = useDocList<Row>(DT.customer, {
-    fields: ["name", "customer_name", "tax_id", "customer_group", "primary_address"],
+    fields: ["name", "customer_name", "tax_id", "customer_group", "customer_primary_address"],
     filters,
     orderBy: { field: "modified", order: "desc" },
     limit: PAGE,
@@ -39,6 +39,7 @@ export default function CustomerList() {
   });
   const { total } = useFilteredCount(DT.customer, filters as unknown as FilterTuple[]);
   const rows = list.data ?? [];
+  const cities = useAddressCities(rows.map((row) => row.customer_primary_address));
 
   const writable = canWrite(session);
   const refreshList = useCallback(() => { void list.mutate(); }, [list]);
@@ -54,7 +55,7 @@ export default function CustomerList() {
     { key: "name", header: t("cust.col.name"), className: "cust", cell: (c) => c.customer_name || c.name },
     { key: "trn", header: t("cust.col.trn"), className: "mono", cell: (c) => c.tax_id || "—" },
     { key: "group", header: t("cust.col.group"), cell: (c) => c.customer_group || "—" },
-    { key: "city", header: t("cust.col.city"), className: "dt", cell: (c) => cityOf(c.primary_address) },
+    { key: "city", header: t("cust.col.city"), className: "dt", cell: (c) => (c.customer_primary_address && cities.get(c.customer_primary_address)) || "—" },
   ];
 
   return (
@@ -84,11 +85,4 @@ export default function CustomerList() {
       </Card>
     </>
   );
-}
-
-/** Addresses arrive as one formatted string; the second line is the city. */
-function cityOf(addr?: string): string {
-  if (!addr) return "—";
-  const parts = addr.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
-  return parts[1] || parts[0] || "—";
 }

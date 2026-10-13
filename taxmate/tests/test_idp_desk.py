@@ -68,8 +68,16 @@ class TestIdpDeskSurface(unittest.TestCase):
 		targets = surface["actions"][0]["targets"]
 		self.assertEqual([row["doctype"] for row in targets], ["Sales Invoice"])
 
-	def test_opportunity_has_no_desk_route(self):
+	def test_scan_dialog_offers_the_books_documents(self):
 		surface = build_surface(can=_allow_all, llm_ready=True)
+		ready = [row["doctype"] for row in surface["actions"][0]["targets"] if row["ready"]]
+		self.assertEqual(
+			ready,
+			["Sales Invoice", "Purchase Invoice", "Quotation", "Payment Entry"],
+		)
+
+	def test_opportunity_has_no_desk_route(self):
+		surface = _full_surface()
 		create = surface["actions"][0]
 		opportunity = next(row for row in create["targets"] if row["doctype"] == "Opportunity")
 		self.assertIsNone(opportunity["route"])

@@ -26,6 +26,15 @@ TARGETS: tuple[dict[str, str | None], ...] = (
 	{"doctype": "Journal Entry", "route": "/journals"},
 )
 
+# What the scan dialog offers. The other TARGETS stay available to IDP
+# tooling. A clerk scans a bill, a purchase, a quote, or a payment.
+SCAN_DOCTYPES: frozenset[str] = frozenset({
+	"Sales Invoice",
+	"Purchase Invoice",
+	"Quotation",
+	"Payment Entry",
+})
+
 # User-facing IDP jobs. Internal tools (ask_user, audit, validate,
 # read_attachment_more) are not jobs. create_master is not a job: the scan
 # never invents masters alone. Supplier / Customer / Item may be proposed and
@@ -212,8 +221,11 @@ def build_surface(
 			continue
 		perm = job["permission"]
 		targets = []
+		limit = SCAN_DOCTYPES if wanted == SURFACE_JOB_IDS else None
 		for row in TARGETS:
 			doctype = str(row["doctype"])
+			if limit is not None and doctype not in limit:
+				continue
 			if not can(doctype, perm):
 				continue
 			route = row["route"]
