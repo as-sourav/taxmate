@@ -226,7 +226,6 @@ export const MOBILE_TAB_PATHS: Record<Exclude<MobileTabId, "home">, string[]> = 
     "/receivables",
     "/payables",
     "/journals",
-    "/bank-reconciliation",
     "/bank-accounts",
   ],
   reports: ["/reports"],
@@ -234,7 +233,8 @@ export const MOBILE_TAB_PATHS: Record<Exclude<MobileTabId, "home">, string[]> = 
 
 /**
  * Nav keys omitted from the phone More sheet only.
- * Redundant with a bottom tab, or desktop-oriented setup/masters.
+ * Redundant with a bottom tab, setup/masters, or workflows that need a
+ * wide screen / external SPA (counter POS, bank match, manufacturing).
  * Routes stay reachable by URL; AppShell rail is unchanged.
  * Callers: MobileNav. docs/mobile-ux/PLAN.md Phase B.
  */
@@ -244,7 +244,7 @@ export const MOBILE_MORE_OMIT = new Set<string>([
   "nav.invoices",
   "nav.payments",
   "nav.reports",
-  // Desktop-oriented
+  // Desktop-oriented setup / masters
   "nav.serialNos",
   "nav.batches",
   "nav.landedCostVouchers",
@@ -278,6 +278,20 @@ export const MOBILE_MORE_OMIT = new Set<string>([
   "nav.loyaltyPrograms",
   "nav.assetCategories",
   "nav.companySettings",
+  // Hard on a phone: desktop rail only
+  "nav.posNext", // external counter SPA (/pos)
+  "nav.bankReconciliation", // wide statement-match UI
+  "nav.stockReconciliations", // qty + valuation grid
+  "nav.workOrders", // manufacturing desk flow
+  "nav.pickLists", // multi-line pick UI
+  "nav.loyaltyPointEntries", // dense ledger
+  "nav.assets", // fixed-asset register
+  "nav.warehouses", // location master
+  "nav.addresses", // edit from party; standalone master is desktop
+  "nav.contacts",
+  "nav.ct", // annual CT / ESR / UBO packs
+  "nav.esr",
+  "nav.ubo",
 ]);
 
 /** Drop omitted keys from top links and groups for the phone More sheet. */
