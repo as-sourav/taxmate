@@ -171,5 +171,6 @@ Full diff, tsc, web build, re-shoot 1440 home/invoices/report vs baseline, write
 |---|---|---|
 | More: omit R+D + quieter list | Sheet lists ~70 destinations; duplicates tabs | Faster one-handed find of daily secondary screens |
 | Money family without Purchase | Purchase lit Money tab | Tab meaning matches Money jobs |
-| List/page bottom padding vs pact-bar | Invoice cards under New sale bar | Primary action stays reachable; rows remain tappable |
+| Topbar controls 40→44px under `.has-mnav` | Under 44px touch floor | Meet target size without changing desktop topbar |
+| List/page bottom padding vs pact-bar | Invoice cards under New sale bar | Existing `:has(.pact-bar)` padding kept; no new sheet |
 | Report unpin (E) | Sticky first col fights horizontal scroll | See whole sheet without fighting the pin |
