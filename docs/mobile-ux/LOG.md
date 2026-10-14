@@ -79,3 +79,12 @@
 | 1440 vs baseline | **PASSED** | Rail + home layout match (after/1440-home-after.png) |
 | Debug code removed | **PASSED** | None added |
 | Capacitor | **SKIPPED** | — |
+
+## Follow-up — hide phone-hostile More rows
+
+| Check | Result | Notes |
+|---|---|---|
+| POS Next off phone More | **PASSED** | `nav.posNext` in `MOBILE_MORE_OMIT` |
+| Other desktop-only adds | **PASSED** | Bank recon, stock recon, WO, pick lists, assets, loyalty ledger, warehouses, addresses/contacts, CT/ESR/UBO |
+| Daily phone paths kept | **PASSED** | Sales docs, purchase, journals, VAT 201, items, Team, POS invoice list |
+| Desktop rail | **PASSED** (by design) | Omit list is MobileNav-only |

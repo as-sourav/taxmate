@@ -49,18 +49,18 @@ Legend: **P** primary (tab or family) · **S** secondary (More) · **D** desktop
 | nav.purchaseInvoices | `/purchase-invoices` | More + Money | **S** | Bills |
 | nav.payables | `/payables` | More + Money | **S** + P-family | AP |
 | nav.stockEntries | `/stock-entries` | More | **S** | Warehouse moves |
-| nav.stockReconciliations | `/stock-reconciliations` | More | **S** | Stock ops |
+| nav.stockReconciliations | `/stock-reconciliations` | More | **D** | Qty + valuation grid — desktop |
 | nav.materialRequests | `/material-requests` | More | **S** | Stock ops |
 | nav.serialNos | `/serial-nos` | More (flag) | **D** | Lookup/setup; flag still gates rail |
 | nav.batches | `/batches` | More (flag) | **D** | Same |
 | nav.landedCostVouchers | `/landed-cost-vouchers` | More | **D** | Rare desktop voucher |
 | nav.boms | `/boms` | More (flag) | **D** | Manufacturing setup |
-| nav.workOrders | `/work-orders` | More (flag) | **S** | Shop-floor if pack on |
-| nav.pickLists | `/pick-lists` | More (flag) | **S** | Fulfilment if pack on |
+| nav.workOrders | `/work-orders` | More (flag) | **D** | Manufacturing desk — phone-hostile |
+| nav.pickLists | `/pick-lists` | More (flag) | **D** | Multi-line pick UI — desktop |
 | nav.journals | `/journals` | More + Money | **S** + P-family | Accountant daily |
 | nav.bankAccounts | `/bank-accounts` | More + Money | **S** + P-family | Cash position |
 | nav.modesOfPayment | `/modes-of-payment` | More | **D** | Master setup |
-| nav.bankReconciliation | `/bank-reconciliation` | More + Money | **S** + P-family | Accountant |
+| nav.bankReconciliation | `/bank-reconciliation` | More + Money | **D** | Wide statement match — desktop |
 | nav.fiscalYears | `/fiscal-years` | More | **D** | Period setup |
 | nav.accounts | `/accounts` | More | **D** | CoA tree better on desktop |
 | nav.costCenters | `/cost-centers` | More | **D** | Setup |
@@ -71,7 +71,7 @@ Legend: **P** primary (tab or family) · **S** secondary (More) · **D** desktop
 | nav.itemGroups | `/catalogue/item-groups` | More | **D** | Taxonomy |
 | nav.brands | `/catalogue/brands` | More | **D** | Taxonomy |
 | nav.uoms | `/catalogue/uoms` | More | **D** | Taxonomy |
-| nav.warehouses | `/warehouses` | More | **S** | Stock location |
+| nav.warehouses | `/warehouses` | More | **D** | Location master — desktop |
 | nav.priceLists | `/price-lists` | More | **D** | Pricing setup |
 | nav.paymentTermsTemplates | `/payment-terms-templates` | More | **D** | Setup |
 | nav.taxTemplates | `/tax-templates` | More | **D** | Tax setup |
@@ -81,13 +81,13 @@ Legend: **P** primary (tab or family) · **S** secondary (More) · **D** desktop
 | nav.customerGroups | `/customer-groups` | More | **D** | Taxonomy |
 | nav.supplierGroups | `/supplier-groups` | More | **D** | Taxonomy |
 | nav.territories | `/territories` | More | **D** | Taxonomy |
-| nav.addresses | `/addresses` | More | **S** | Party address fix-ups |
-| nav.contacts | `/contacts` | More | **S** | Party contacts |
+| nav.addresses | `/addresses` | More | **D** | Edit from party; standalone master is desktop |
+| nav.contacts | `/contacts` | More | **D** | Same |
 | nav.termsAndConditions | `/terms-and-conditions` | More | **D** | Legal boilerplate |
 | nav.vat201 | `/vat-201` | More | **S** | UAE filing daily path |
-| nav.ct | `/ct-filings` | More | **S** | CT filings |
-| nav.esr | `/esr` | More | **S** | ESR |
-| nav.ubo | `/ubo` | More | **S** | UBO |
+| nav.ct | `/ct-filings` | More | **D** | Annual dense pack — desktop |
+| nav.esr | `/esr` | More | **D** | Same |
+| nav.ubo | `/ubo` | More | **D** | Same |
 | nav.lateFilings | `/late-filings` | More | **S** | Notices |
 | nav.eInvoiceLog | `/e-invoice-log` | More | **S** | E-invoice ops |
 | nav.taxSettings | `/tax-settings` | More | **D** | ASP / site settings |
@@ -98,10 +98,10 @@ Legend: **P** primary (tab or family) · **S** secondary (More) · **D** desktop
 | nav.uaeCapitalGoods | `/uae-capital-goods-adjustments` | More | **D** | Rare |
 | nav.posInvoices | `/pos-invoices` | More + Sales family | **S** + P-family | If POS flag |
 | nav.posProfiles | `/pos-profiles` | More | **D** | POS setup |
-| nav.posNext | external | More | **S** | External POS when allowed |
+| nav.posNext | external | More | **D** | Counter SPA — nobody uses from phone More |
 | nav.loyaltyPrograms | `/loyalty-programs` | More | **D** | Program setup |
-| nav.loyaltyPointEntries | `/loyalty-point-entries` | More | **S** | Point ledger if pack on |
-| nav.assets | `/assets` | More | **S** | Asset list if pack on |
+| nav.loyaltyPointEntries | `/loyalty-point-entries` | More | **D** | Dense ledger — desktop |
+| nav.assets | `/assets` | More | **D** | Fixed-asset register — desktop |
 | nav.assetCategories | `/asset-categories` | More | **D** | Asset setup |
 | nav.companySettings | `/company` | More | **D** | Wide settings form |
 | nav.team | `/team` | More (role) | **S** | Invite still needed on phone for owners |
@@ -112,14 +112,14 @@ Legend: **P** primary (tab or family) · **S** secondary (More) · **D** desktop
 
 1. Sales — customers, orders, quotations, DN, receivables, leads _(no invoices)_
 2. Purchase — full purchase list + payables
-3. Stock — SE, SR, MR, work orders, pick lists _(no serial/batch/LCV/BOM)_
-4. Accounting — journals, bank accounts, bank recon _(no CoA/FY/…)_ ; _(no reports)_
-5. Masters — items, warehouses, addresses, contacts
-6. UAE Compliance — VAT 201, CT, ESR, UBO, late filings, e-invoice log
-7. POS / Loyalty / Assets — invoices/points/assets + POS Next when flagged _(no profiles/programs/categories)_
-8. Company — Team only when `canViewTeam` _(no Company Settings)_
+3. Stock — stock entries, material requests _(no recon / WO / pick / serial / batch)_
+4. Accounting — journals, bank accounts _(no recon / CoA / FY)_
+5. Masters — items only
+6. UAE Compliance — VAT 201, late filings, e-invoice log _(no CT / ESR / UBO)_
+7. POS — POS invoices list only when flagged _(no POS Next / profiles / loyalty / assets)_
+8. Company — Team only when `canViewTeam`
 
-Top-level Dashboard link removed (Home tab).
+Top-level Dashboard link removed (Home tab). Desktop rail still shows every allowed entry.
 
 ---
 
