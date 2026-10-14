@@ -1,6 +1,6 @@
 /**
- * Phone navigation: a fixed bottom tab bar plus a "More" sheet holding every
- * nav entry the user is allowed to see.
+ * Phone navigation: a fixed bottom tab bar plus a "More" sheet of secondary
+ * destinations (tabs cover Home / Sales / Money / Reports; omit list in nav.ts).
  *
  * Why this exists: below 900px the rail used to become a horizontal scrolling
  * strip with its section headers hidden, which made Purchase, Stock,
@@ -22,7 +22,13 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 
 import { t } from "../i18n/strings";
 import { useLang } from "../lib/i18n";
-import { mobileTabForPath, type MobileTabId, type NavGroup, type NavLinkItem } from "../lib/nav";
+import {
+  filterNavForMobileMore,
+  mobileTabForPath,
+  type MobileTabId,
+  type NavGroup,
+  type NavLinkItem,
+} from "../lib/nav";
 import { useMedia } from "../lib/useMedia";
 import { navIcon } from "./navIcons";
 
@@ -128,9 +134,11 @@ export default function MobileNav({ top, groups }: { top: NavLinkItem[]; groups:
   }, [open, close]);
 
   const sections = useMemo<Section[]>(() => {
+    // Presentation-only: rail still gets the full AppShell nav.
+    const phone = filterNavForMobileMore(top, groups);
     const all: Section[] = [];
-    if (top.length) all.push({ key: null, links: top });
-    for (const g of groups) all.push({ key: g.key, links: g.links });
+    if (phone.top.length) all.push({ key: null, links: phone.top });
+    for (const g of phone.groups) all.push({ key: g.key, links: g.links });
 
     const q = query.trim().toLowerCase();
     if (!q) return all;

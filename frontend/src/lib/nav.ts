@@ -220,22 +220,79 @@ export const MOBILE_TAB_PATHS: Record<Exclude<MobileTabId, "home">, string[]> = 
     "/leads",
     "/pos-invoices",
   ],
+  // Purchase stays in More only — lighting Money while browsing POs was confusing.
   money: [
     "/payments",
     "/receivables",
     "/payables",
-    "/suppliers",
-    "/supplier-quotations",
-    "/purchase-orders",
-    "/purchase-receipts",
-    "/incoming-invoices",
-    "/purchase-invoices",
     "/journals",
     "/bank-reconciliation",
     "/bank-accounts",
   ],
   reports: ["/reports"],
 };
+
+/**
+ * Nav keys omitted from the phone More sheet only.
+ * Redundant with a bottom tab, or desktop-oriented setup/masters.
+ * Routes stay reachable by URL; AppShell rail is unchanged.
+ * Callers: MobileNav. docs/mobile-ux/PLAN.md Phase B.
+ */
+export const MOBILE_MORE_OMIT = new Set<string>([
+  // Redundant with tabs
+  "nav.dashboard",
+  "nav.invoices",
+  "nav.payments",
+  "nav.reports",
+  // Desktop-oriented
+  "nav.serialNos",
+  "nav.batches",
+  "nav.landedCostVouchers",
+  "nav.boms",
+  "nav.modesOfPayment",
+  "nav.fiscalYears",
+  "nav.accounts",
+  "nav.costCenters",
+  "nav.periodClosing",
+  "nav.currencyExchanges",
+  "nav.itemGroups",
+  "nav.brands",
+  "nav.uoms",
+  "nav.priceLists",
+  "nav.paymentTermsTemplates",
+  "nav.taxTemplates",
+  "nav.taxCategories",
+  "nav.itemTaxTemplates",
+  "nav.pricingRules",
+  "nav.customerGroups",
+  "nav.supplierGroups",
+  "nav.territories",
+  "nav.termsAndConditions",
+  "nav.taxSettings",
+  "nav.uaeRelatedParties",
+  "nav.uaeVatGroups",
+  "nav.uaeBadDebt",
+  "nav.uaeCustoms",
+  "nav.uaeCapitalGoods",
+  "nav.posProfiles",
+  "nav.loyaltyPrograms",
+  "nav.assetCategories",
+  "nav.companySettings",
+]);
+
+/** Drop omitted keys from top links and groups for the phone More sheet. */
+export function filterNavForMobileMore(top: NavLinkItem[], groups: NavGroup[]): {
+  top: NavLinkItem[];
+  groups: NavGroup[];
+} {
+  const keep = (item: NavLinkItem) => !MOBILE_MORE_OMIT.has(item.key);
+  return {
+    top: top.filter(keep),
+    groups: groups
+      .map((g) => ({ ...g, links: g.links.filter(keep) }))
+      .filter((g) => g.links.length > 0),
+  };
+}
 
 function inFamily(paths: string[], path: string): boolean {
   return paths.some((p) => path === p || path.startsWith(`${p}/`));
