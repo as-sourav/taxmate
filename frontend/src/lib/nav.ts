@@ -219,7 +219,6 @@ export const MOBILE_TAB_PATHS: Record<Exclude<MobileTabId, "home">, string[]> = 
     "/delivery-notes",
     "/invoices",
     "/leads",
-    "/pos-invoices",
   ],
   // Purchase stays in More only — lighting Money while browsing POs was confusing.
   money: [
@@ -232,75 +231,41 @@ export const MOBILE_TAB_PATHS: Record<Exclude<MobileTabId, "home">, string[]> = 
 };
 
 /**
- * Nav keys omitted from the phone More sheet only.
- * Redundant with a bottom tab, setup/masters, or workflows that need a
- * wide screen / external SPA (counter POS, bank match, manufacturing).
- * Routes stay reachable by URL; AppShell rail is unchanged.
- * Callers: MobileNav. docs/mobile-ux/PLAN.md Phase B.
+ * Phone More: allowlist only (≤4 daily links per module).
+ * Stock, POS, fixed assets, setup masters, and reports stay on the desktop rail.
+ * Invoices are listed here even though the Sales tab opens `/invoices`.
+ * Callers: MobileNav. Routes stay reachable by URL.
  */
-export const MOBILE_MORE_OMIT = new Set<string>([
-  // Redundant with tabs
-  "nav.dashboard",
+export const MOBILE_MORE_KEEP = new Set<string>([
+  // Sales (4) — invoices were easy to miss when only on the Sales tab
   "nav.invoices",
-  "nav.payments",
-  // Reports: desktop rail only (wide tables / print)
-  "nav.reports",
-  // Desktop-oriented setup / masters
-  "nav.serialNos",
-  "nav.batches",
-  "nav.landedCostVouchers",
-  "nav.boms",
-  "nav.modesOfPayment",
-  "nav.fiscalYears",
-  "nav.accounts",
-  "nav.costCenters",
-  "nav.periodClosing",
-  "nav.currencyExchanges",
-  "nav.itemGroups",
-  "nav.brands",
-  "nav.uoms",
-  "nav.priceLists",
-  "nav.paymentTermsTemplates",
-  "nav.taxTemplates",
-  "nav.taxCategories",
-  "nav.itemTaxTemplates",
-  "nav.pricingRules",
-  "nav.customerGroups",
-  "nav.supplierGroups",
-  "nav.territories",
-  "nav.termsAndConditions",
-  "nav.taxSettings",
-  "nav.uaeRelatedParties",
-  "nav.uaeVatGroups",
-  "nav.uaeBadDebt",
-  "nav.uaeCustoms",
-  "nav.uaeCapitalGoods",
-  "nav.posProfiles",
-  "nav.loyaltyPrograms",
-  "nav.assetCategories",
-  "nav.companySettings",
-  // Hard on a phone: desktop rail only
-  "nav.posNext", // external counter SPA (/pos)
-  "nav.bankReconciliation", // wide statement-match UI
-  "nav.stockReconciliations", // qty + valuation grid
-  "nav.workOrders", // manufacturing desk flow
-  "nav.pickLists", // multi-line pick UI
-  "nav.loyaltyPointEntries", // dense ledger
-  "nav.assets", // fixed-asset register
-  "nav.warehouses", // location master
-  "nav.addresses", // edit from party; standalone master is desktop
-  "nav.contacts",
-  "nav.ct", // annual CT / ESR / UBO packs
-  "nav.esr",
-  "nav.ubo",
+  "nav.customers",
+  "nav.salesOrders",
+  "nav.quotations",
+  // Purchase (4)
+  "nav.purchaseInvoices",
+  "nav.suppliers",
+  "nav.purchaseOrders",
+  "nav.payables",
+  // Accounting (2) — payments live on the Money tab
+  "nav.journals",
+  "nav.bankAccounts",
+  // Masters (1)
+  "nav.items",
+  // Compliance (3)
+  "nav.vat201",
+  "nav.lateFilings",
+  "nav.eInvoiceLog",
+  // Company (1)
+  "nav.team",
 ]);
 
-/** Drop omitted keys from top links and groups for the phone More sheet. */
+/** Keep only allowlisted keys for the phone More sheet. */
 export function filterNavForMobileMore(top: NavLinkItem[], groups: NavGroup[]): {
   top: NavLinkItem[];
   groups: NavGroup[];
 } {
-  const keep = (item: NavLinkItem) => !MOBILE_MORE_OMIT.has(item.key);
+  const keep = (item: NavLinkItem) => MOBILE_MORE_KEEP.has(item.key);
   return {
     top: top.filter(keep),
     groups: groups
