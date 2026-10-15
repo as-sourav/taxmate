@@ -398,18 +398,6 @@
     font-size: 12px;
     font-weight: 600;
   }
-  /* Scan: mark only — label lives in aria-label. */
-  .app.has-mnav .scanbtn {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
-    min-height: 44px;
-    padding: 0;
-    border-radius: 11px;
-    gap: 0;
-    justify-content: center;
-  }
-  .app.has-mnav .scanbtn-lab { display: none; }
   .app.has-mnav .tools { gap: 4px; }
   .app.has-mnav .tright { gap: 4px; }
   /* Company: abbr tile only — full name is in the menu / aria-label. */

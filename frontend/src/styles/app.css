@@ -920,7 +920,6 @@ td.pick{width:38px; padding-inline-end:0}
 @media (min-width:761px) and (max-width:900px){
   .langbtn{min-height:44px}
   .iconbtn,.umavbtn{width:44px; height:44px; min-width:44px; min-height:44px}
-  .scanbtn{min-height:44px; height:auto}
 }
 
 /* Server message. Sits at the top of the viewport and drops in. */
@@ -965,9 +964,8 @@ td.pick{width:38px; padding-inline-end:0}
 .msgdlg-body p{margin:0 0 8px}
 .msgdlg-body p:last-child{margin:0}
 
-/* Topbar tools (CaptureDesk) — kept from live */
+/* Topbar tools (CaptureDesk scan icon, language, theme) */
 .tools{display:flex; align-items:center; gap:6px}
-.scanbtn{min-height:44px; height:auto; padding:0 14px; border-radius:10px; gap:6px; display:inline-flex; align-items:center}
 .langbtn:hover,.iconbtn.bordered:hover{background:var(--hover)}
 
 /* Company switcher on phones: the abbreviation tile only; the menu names it. */
