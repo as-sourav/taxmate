@@ -90,14 +90,13 @@ export function CaptureDesk() {
       <button
         ref={openRef}
         type="button"
-        className="btn scanbtn"
+        className="iconbtn bordered"
         aria-label={t("idp.open")}
         onClick={() => setOpen(true)}
       >
         <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
           <path d="M3.2 6.2V3.4h2.8M14.8 6.2V3.4h-2.8M3.2 11.8v2.8h2.8M14.8 11.8v2.8h-2.8M2.8 9h12.4" />
         </svg>
-        <span className="scanbtn-lab">{t("idp.open")}</span>
       </button>
       {open ? (
         <CapturePanel

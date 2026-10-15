@@ -1,6 +1,6 @@
 /**
  * Phone navigation: a fixed bottom tab bar plus a "More" sheet of secondary
- * destinations (tabs cover Home / Sales / Money / Reports; omit list in nav.ts).
+ * destinations (tabs cover Home / Sales / Money; omit list in nav.ts).
  *
  * Why this exists: below 900px the rail used to become a horizontal scrolling
  * strip with its section headers hidden, which made Purchase, Stock,
@@ -45,7 +45,6 @@ const TABS: { id: MobileTabId; to: string; key: string }[] = [
   { id: "home", to: "/", key: "m.tab.home" },
   { id: "sales", to: "/invoices", key: "m.tab.sales" },
   { id: "money", to: "/payments", key: "m.tab.money" },
-  { id: "reports", to: "/reports", key: "m.tab.reports" },
 ];
 
 const FOCUSABLE =
