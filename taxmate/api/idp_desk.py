@@ -224,16 +224,22 @@ def _file_gate(file_url: str) -> str | None:
 def _ocr_language(path: str) -> str:
 	"""Detect a real OCR code from the file on disk. Never pass ``auto`` to Paddle.
 
-	Runs through ``detect_language_isolated`` (subprocess + timeout) rather
-	than the bare engine call: an in-process PaddleOCR init can hang on a
-	model download with no bound, which blocked the whole scan at this
-	first stage before the fix.
+	Prefer ``detect_language_isolated`` (subprocess + timeout) when the installed
+	IDP build exports it. Older IDP versions only have ``detect_language`` —
+	UAT was crashing Scan with ImportError before any OCR ran.
 	"""
 	from idp.core.constants import OCR_LANGUAGES
-	from idp.ocr.engine import detect_language_isolated
 
+	detected = ""
 	try:
-		detected = detect_language_isolated(path) or ""
+		from idp.ocr import engine as ocr_engine
+
+		isolated = getattr(ocr_engine, "detect_language_isolated", None)
+		detect = getattr(ocr_engine, "detect_language", None)
+		if callable(isolated):
+			detected = isolated(path) or ""
+		elif callable(detect):
+			detected = detect(path) or ""
 	except Exception:
 		detected = ""
 	return resolve_ocr_language(detected, set(OCR_LANGUAGES))
@@ -288,6 +294,25 @@ def run(
 	query: str | None = None,
 ) -> dict:
 	require_login()
+	try:
+		return _run(action, target_doctype, file_url, query)
+	except Exception:
+		frappe.log_error(title="TaxMate IDP run failed", message=frappe.get_traceback())
+		return {
+			"ok": False,
+			"step": "review",
+			"error_key": "idp.readFailed",
+			"detail_key": "idp.readHint",
+			"can_save": False,
+		}
+
+
+def _run(
+	action: str,
+	target_doctype: str | None = None,
+	file_url: str | None = None,
+	query: str | None = None,
+) -> dict:
 	planned = _plan(action, target_doctype, file_url, query)
 	if not planned.get("ok"):
 		return planned
