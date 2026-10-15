@@ -1,6 +1,6 @@
 /**
  * Phone navigation: a fixed bottom tab bar plus a "More" sheet of secondary
- * destinations (tabs cover Home / Sales / Money; omit list in nav.ts).
+ * destinations (tabs: Home / Sales / Money; More uses MOBILE_MORE_KEEP in nav.ts).
  *
  * Why this exists: below 900px the rail used to become a horizontal scrolling
  * strip with its section headers hidden, which made Purchase, Stock,
