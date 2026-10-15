@@ -284,11 +284,16 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
     } catch (err) {
       if (ac.signal.aborted || timedOut) return;
       const detail = readableError(err).join(" ").trim();
+      const useless =
+        !detail ||
+        detail === t("idp.readFailed") ||
+        detail === "Something went wrong." ||
+        detail === "Something went wrong";
       setReview({
         ok: false,
         error_key: "idp.readFailed",
-        detail_key: detail ? null : "idp.readHint",
-        detail: detail && detail !== t("idp.readFailed") ? detail : null,
+        detail_key: "idp.readHint",
+        detail: useless ? null : detail,
         can_save: false,
       });
     } finally {
