@@ -60,6 +60,7 @@ type Review = {
   ok?: boolean;
   step?: string;
   error_key?: string | null;
+  detail_key?: string | null;
   detail?: string | null;
   lines?: { label_key: string; value: string }[];
   items?: { label: string }[];
@@ -143,7 +144,16 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
     const next = event.target.files?.[0];
     /* Cancel / empty change must not wipe a prior photo or file. */
     if (!next) return;
-    setFile(next);
+    const prepared = prepareScanFile(next);
+    if ("error_key" in prepared) {
+      setFile(null);
+      setFileUrl(null);
+      setProposals([]);
+      setReview({ ok: false, error_key: prepared.error_key, can_save: false });
+      event.target.value = "";
+      return;
+    }
+    setFile(prepared.file);
     setReview(null);
     setProposals([]);
     setFileUrl(null);
@@ -221,10 +231,28 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
       setReview({ ok: false, error_key: "idp.readSlow" });
     }, 100_000);
     try {
-      const uploaded = await postFile(file, ac.signal);
+      const prepared = prepareScanFile(file);
+      if ("error_key" in prepared) {
+        setReview({ ok: false, error_key: prepared.error_key, can_save: false });
+        return;
+      }
+      const uploaded = await postFile(prepared.file, ac.signal);
       if (ac.signal.aborted) return;
+      if (uploaded.success === false || uploaded.error_key) {
+        setReview({
+          ok: false,
+          error_key: String(uploaded.error_key || "idp.readFailed"),
+          detail_key: uploaded.detail_key ? String(uploaded.detail_key) : null,
+          detail: uploadDetail(uploaded),
+          can_save: false,
+        });
+        return;
+      }
       const url = String(uploaded.file_url || "");
-      if (!url) throw new Error(t("idp.readFailed"));
+      if (!url) {
+        setReview({ ok: false, error_key: "idp.readFailed", detail_key: "idp.readHint", can_save: false });
+        return;
+      }
       setFileUrl(url);
       setPhase("reading");
       const result = await postForm(
@@ -238,13 +266,31 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         ac.signal,
       );
       if (ac.signal.aborted || timedOut) return;
+      if (result.ok === false && result.error_key) {
+        setReview({
+          ...result,
+          detail: distinctDetail(result),
+          can_save: false,
+        });
+        setWrites([]);
+        setProposals([]);
+        setStageIdx(stages.length - 1);
+        return;
+      }
       setReview(result);
       setWrites(Array.isArray(result.writes) ? result.writes : []);
       setProposals(Array.isArray(result.proposals) ? cloneProposals(result.proposals) : []);
       setStageIdx(stages.length - 1);
     } catch (err) {
       if (ac.signal.aborted || timedOut) return;
-      setReview({ ok: false, error_key: "idp.readFailed", detail: readableError(err).join(" ") });
+      const detail = readableError(err).join(" ").trim();
+      setReview({
+        ok: false,
+        error_key: "idp.readFailed",
+        detail_key: detail ? null : "idp.readHint",
+        detail: detail && detail !== t("idp.readFailed") ? detail : null,
+        can_save: false,
+      });
     } finally {
       window.clearTimeout(slow);
       if (!ac.signal.aborted && !timedOut) {
@@ -508,12 +554,11 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
           ) : null}
         </div>
 
-        {review ? (
+        {review && (scanHasContent(review, proposals) || review.ok !== false) ? (
           <div className="idp-foot">
             {review.error_key && !review.ok ? (
               <p className="idp-err" role="alert">
-                {t(review.error_key)}
-                {review.detail ? ` — ${review.detail}` : ""}
+                {formatScanError(review)}
               </p>
             ) : null}
             {proposals.length > 0 && !(review.error_key && !review.ok) ? (
@@ -569,8 +614,11 @@ function ReviewBlock({
 }) {
   return (
     <div className="idp-job" role="status" aria-live="polite">
-      {review.error_key ? <p>{t(review.error_key)}</p> : null}
-      {review.detail ? <p>{review.detail}</p> : null}
+      {review.error_key && !review.ok && !scanHasContent(review, proposals) ? (
+        <p className="idp-err" role="alert">
+          {formatScanError(review)}
+        </p>
+      ) : null}
       {review.step === "saved" ? <p>{t("idp.saved")}</p> : null}
       {review.step === "submitted" ? <p>{t("idp.submittedNow")}</p> : null}
       {review.route && review.error_key && review.name ? (
@@ -792,10 +840,79 @@ function trapTab(event: KeyboardEvent, root: HTMLElement) {
   }
 }
 
+const SCAN_MAX_BYTES = 25 * 1024 * 1024;
+
 /** Extensions from the surface plus MIME types Android/iOS WebViews honour. */
 function fileAccept(exts: string[] | undefined): string {
   const list = exts?.length ? exts : [".pdf", ".png", ".jpg", ".jpeg"];
-  return [...list, "application/pdf", "image/*"].join(",");
+  return [...list, "application/pdf", "image/jpeg", "image/png", "image/webp", "image/*"].join(",");
+}
+
+/** Normalize camera quirks client-side before upload; reject HEIC/empty/huge early. */
+function prepareScanFile(file: File): { file: File } | { error_key: string } {
+  if (!file || file.size <= 0) return { error_key: "idp.emptyFile" };
+  if (file.size > SCAN_MAX_BYTES) return { error_key: "idp.tooLarge" };
+  const name = (file.name || "document").trim() || "document";
+  const type = (file.type || "").toLowerCase().split(";")[0].trim();
+  if (type.includes("heic") || type.includes("heif") || /\.hei[cf]$/i.test(name)) {
+    return { error_key: "idp.needJpeg" };
+  }
+  let nextType = type;
+  let nextName = name;
+  if (nextType === "image/jpg" || nextType === "image/pjpeg") nextType = "image/jpeg";
+  if (!nextType || nextType === "application/octet-stream" || nextType === "binary/octet-stream") {
+    if (/\.pdf$/i.test(nextName)) nextType = "application/pdf";
+    else if (/\.png$/i.test(nextName)) nextType = "image/png";
+    else if (/\.webp$/i.test(nextName)) nextType = "image/webp";
+    else if (/\.(jpe?g)$/i.test(nextName)) nextType = "image/jpeg";
+    else {
+      // Phone camera often omits a type and a useful name — treat as JPEG.
+      nextType = "image/jpeg";
+      if (!/\.[a-z0-9]+$/i.test(nextName)) nextName = `${nextName}.jpg`;
+    }
+  }
+  if (nextType === "image/jpeg" && !/\.(jpe?g)$/i.test(nextName)) nextName = `${nextName}.jpg`;
+  if (nextType === file.type && nextName === file.name) return { file };
+  return { file: new File([file], nextName, { type: nextType, lastModified: file.lastModified }) };
+}
+
+function scanHasContent(review: Review, proposals: Proposal[]): boolean {
+  return Boolean(
+    (review.lines && review.lines.length > 0) ||
+      (review.items && review.items.length > 0) ||
+      (review.writes && review.writes.length > 0) ||
+      proposals.length > 0,
+  );
+}
+
+/** One user-facing line; never repeats the same sentence twice. */
+function formatScanError(review: Review): string {
+  const head = review.error_key ? t(review.error_key) : "";
+  const hint = review.detail_key ? t(review.detail_key) : "";
+  const detail = (review.detail || "").trim();
+  const parts: string[] = [];
+  if (head) parts.push(head);
+  for (const part of [hint, detail]) {
+    if (part && !parts.includes(part)) parts.push(part);
+  }
+  return parts.join(" — ") || t("idp.readFailed");
+}
+
+function distinctDetail(review: Review): string | null {
+  const detail = (review.detail || "").trim();
+  if (!detail) return null;
+  if (review.error_key && detail === t(review.error_key)) return null;
+  if (review.detail_key && detail === t(review.detail_key)) return null;
+  return detail;
+}
+
+function uploadDetail(uploaded: Record<string, unknown>): string | null {
+  const raw = uploaded.detail;
+  if (typeof raw !== "string") return null;
+  const detail = raw.trim();
+  if (!detail) return null;
+  const key = uploaded.error_key ? t(String(uploaded.error_key)) : t("idp.readFailed");
+  return detail === key ? null : detail;
 }
 
 async function postFile(file: File, signal: AbortSignal): Promise<Record<string, unknown>> {
@@ -828,9 +945,23 @@ async function postForm(
 }
 
 async function readMessage(res: Response): Promise<Record<string, unknown>> {
+  /* Callers: postFile / postForm. Soft IDP errors use error_key; HTTP failures throw. */
   const data = await res.json();
+  const message = data.message ?? data;
   if (!res.ok || data.exc) {
-    throw new Error(typeof data.message === "string" ? data.message : t("idp.readFailed"));
+    if (
+      message &&
+      typeof message === "object" &&
+      !Array.isArray(message) &&
+      ("error_key" in message || "success" in message)
+    ) {
+      return message as Record<string, unknown>;
+    }
+    const lines = readableError(data).join(" ").trim();
+    throw new Error(lines || t("idp.readFailed"));
   }
-  return (data.message ?? data) as Record<string, unknown>;
+  if (message && typeof message === "object" && !Array.isArray(message)) {
+    return message as Record<string, unknown>;
+  }
+  return (data as Record<string, unknown>) ?? {};
 }
