@@ -42,4 +42,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- App lock: fingerprint / face unlock (androidx.biometric also merges this). -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Scan: HTML capture="environment" opens the device camera in WebView. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

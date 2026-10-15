@@ -195,6 +195,15 @@ div.od-cmp-i:hover{background:transparent}
 .idp-job h3{font-size:14px; font-weight:600; margin:0 0 4px}
 .idp-job p{margin:0; color:var(--muted); font-size:13px}
 .idp-targets{display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 8px}
+.idp-sources{
+  display:grid; grid-template-columns:1fr 1fr; gap:10px;
+  margin:8px 0 8px;
+}
+.idp-sources .idp-drop{margin:0; min-height:88px; padding:16px 12px}
+.idp-picked{
+  margin:0 0 12px; font-size:12.5px; color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
 .idp-drop{
   position:relative; display:flex; flex-direction:column; gap:4px;
   margin:8px 0 12px; padding:18px 14px; min-height:72px;

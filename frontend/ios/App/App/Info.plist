@@ -10,6 +10,10 @@
         <string>TaxMate</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>TaxMate uses Face ID to unlock the app instead of your PIN.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>TaxMate uses the camera to photograph invoices and receipts for Scan.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>TaxMate uses your photo library when you choose an existing invoice image for Scan.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

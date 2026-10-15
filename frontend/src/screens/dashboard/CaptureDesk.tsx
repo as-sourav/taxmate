@@ -1,16 +1,18 @@
 /**
- * Scan panel — create a draft from a file via IDP.
- * The backend names targets, proposals, and whether a draft can be saved.
+ * Scan panel — create a draft from a photo or file via IDP.
+ * On mobile/native: Take photo (capture) or Choose file. Desktop: file only.
  * One job only: create. Dialog stays open until Close/Cancel; that aborts work.
  */
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ChangeEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useFrappeGetCall } from "frappe-react-sdk";
 
+import { useIsMobileShell } from "../../components/MobileNav";
 import { METHOD, readableError } from "../../lib/frappe";
 import { t } from "../../i18n/strings";
 import { apiFetch } from "../../mobile/http";
+import { isNative } from "../../mobile/platform";
 
 type Target = {
   doctype: string;
@@ -119,6 +121,9 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const nav = useNavigate();
+  const mobileShell = useIsMobileShell();
+  /** Camera capture on phone/shell and native apps; desktop keeps file-only. */
+  const showCamera = mobileShell || isNative();
   const res = useFrappeGetCall<{ message: Surface }>(METHOD.idpSurface, undefined, "idp-surface");
   const surface = res.data?.message;
   const action = surface?.actions?.find((row) => row.id === "create") ?? surface?.actions?.[0] ?? null;
@@ -134,6 +139,18 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
   const [proposals, setProposals] = useState<Proposal[]>([]);
 
   const busy = phase !== "idle";
+
+  function onPickFile(event: ChangeEvent<HTMLInputElement>) {
+    const next = event.target.files?.[0];
+    /* Cancel / empty change must not wipe a prior photo or file. */
+    if (!next) return;
+    setFile(next);
+    setReview(null);
+    setProposals([]);
+    setFileUrl(null);
+    /* Allow picking the same photo again after cancel/replace. */
+    event.target.value = "";
+  }
 
   useEffect(() => {
     if (!action || target) return;
@@ -393,21 +410,53 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
                 ))}
               </div>
 
-              <label className={`idp-drop${file ? " has-file" : ""}`}>
-                <input
-                  type="file"
-                  accept={fileAccept(surface?.accept)}
-                  disabled={busy}
-                  onChange={(event) => {
-                    setFile(event.target.files?.[0] ?? null);
-                    setReview(null);
-                    setProposals([]);
-                    setFileUrl(null);
-                  }}
-                />
-                <span className="idp-drop-title">{file ? file.name : t("idp.drop")}</span>
-                <span className="idp-drop-hint">{t("idp.dropHint")}</span>
-              </label>
+              {showCamera ? (
+                <>
+                  <div
+                    className={`idp-sources${file ? " has-file" : ""}`}
+                    role="group"
+                    aria-label={t("idp.sources")}
+                  >
+                    <label className={`idp-drop${file ? " has-file" : ""}`}>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        disabled={busy}
+                        onChange={onPickFile}
+                      />
+                      <span className="idp-drop-title">{t("idp.camera")}</span>
+                      <span className="idp-drop-hint">{t("idp.cameraHint")}</span>
+                    </label>
+                    <label className={`idp-drop${file ? " has-file" : ""}`}>
+                      <input
+                        type="file"
+                        accept={fileAccept(surface?.accept)}
+                        disabled={busy}
+                        onChange={onPickFile}
+                      />
+                      <span className="idp-drop-title">{t("idp.drop")}</span>
+                      <span className="idp-drop-hint">{t("idp.dropHint")}</span>
+                    </label>
+                  </div>
+                  {file ? (
+                    <p className="idp-picked" role="status" aria-live="polite" title={file.name}>
+                      {file.name}
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <label className={`idp-drop${file ? " has-file" : ""}`}>
+                  <input
+                    type="file"
+                    accept={fileAccept(surface?.accept)}
+                    disabled={busy}
+                    onChange={onPickFile}
+                  />
+                  <span className="idp-drop-title">{file ? file.name : t("idp.drop")}</span>
+                  <span className="idp-drop-hint">{t("idp.dropHint")}</span>
+                </label>
+              )}
 
               <button
                 type="button"
