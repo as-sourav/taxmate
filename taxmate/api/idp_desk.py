@@ -45,10 +45,62 @@ def get_surface() -> dict:
 
 @frappe.whitelist()
 def upload() -> dict:
+	"""Accept a Scan file; normalize camera MIME quirks before IDP validates.
+
+	Callers: CaptureDesk postFile → METHOD.idpUpload (catalog). Soft-fails with
+	error_key instead of opaque 417 when MIME/size is wrong.
+	User: foolproof Scan so upload does not show a generic read failure.
+	"""
 	require_login()
+	from io import BytesIO
+
+	from werkzeug.datastructures import FileStorage, ImmutableMultiDict
+
+	from taxmate.idp.upload_prep import normalize_upload_headers
+
+	if "file" not in (frappe.request.files or {}):
+		return {"success": False, "error_key": "idp.emptyFile"}
+
+	uploaded = frappe.request.files["file"]
+	raw = uploaded.stream.read() if hasattr(uploaded, "stream") else uploaded.read()
+	prep = normalize_upload_headers(
+		frappe.utils.cstr(uploaded.filename or "document"),
+		frappe.utils.cstr(uploaded.content_type or ""),
+		raw or b"",
+	)
+	if not prep.get("ok"):
+		return {"success": False, "error_key": prep.get("error_key") or "idp.file"}
+
+	# Re-inject a clean FileStorage so IDP's MIME/size checks see the real type.
+	frappe.request.files = ImmutableMultiDict(
+		[
+			(
+				"file",
+				FileStorage(
+					stream=BytesIO(prep["content"]),
+					filename=prep["file_name"],
+					content_type=prep["content_type"],
+				),
+			)
+		]
+	)
+
 	from idp.api.upload import upload_document
 
-	return upload_document()
+	try:
+		return upload_document()
+	except frappe.ValidationError as exc:
+		msg = frappe.utils.cstr(exc).lower()
+		if "size" in msg:
+			return {"success": False, "error_key": "idp.tooLarge"}
+		if "empty" in msg:
+			return {"success": False, "error_key": "idp.emptyFile"}
+		if "unsupported" in msg or "type" in msg:
+			return {"success": False, "error_key": "idp.file"}
+		return {"success": False, "error_key": "idp.readFailed", "detail": frappe.utils.cstr(exc)[:200]}
+	except Exception:
+		frappe.log_error(title="TaxMate IDP upload failed", message=frappe.get_traceback())
+		return {"success": False, "error_key": "idp.readFailed"}
 
 
 def _read(file_url: str, target: str, *, use_model: bool = False) -> dict:

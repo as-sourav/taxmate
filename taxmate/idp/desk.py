@@ -751,7 +751,15 @@ def review_from_extract(extracted: dict[str, Any], *, route: str | None) -> dict
 	)
 
 	if not extracted.get("success"):
-		return {"ok": False, "step": "review", "error_key": "idp.readFailed", "can_save": False}
+		# Hint is a separate key so the SPA shows one clear line (not a duplicate).
+		# Callers: idp_desk.run → review_from_extract. User: foolproof Scan errors.
+		return {
+			"ok": False,
+			"step": "review",
+			"error_key": "idp.readFailed",
+			"detail_key": "idp.readHint",
+			"can_save": False,
+		}
 	release_currency_company(extracted)
 	release_address_links(extracted)
 	data = extracted.get("extracted_data") or {}
