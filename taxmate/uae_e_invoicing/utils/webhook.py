@@ -131,7 +131,7 @@ def _verify_signature(raw_body: bytes) -> bool:
 	secret = settings.get_password("webhook_secret")
 	headers = frappe.request.headers
 
-	signature = headers.get("X-Webhook-Signature") or headers.get("X-Flick-Signature")
+	signature = headers.get("X-Webhook-Signature")
 	if signature:
 		expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
 		provided = signature.removeprefix("sha256=")

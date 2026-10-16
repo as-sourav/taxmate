@@ -373,59 +373,6 @@ class TestPintAePayload(unittest.TestCase):
 		self.assertEqual(lists, {"HS", "SAC"})
 
 
-class TestFlickMapper(unittest.TestCase):
-	"""PINT-AE payload -> Flick flat document schema."""
-
-	def setUp(self):
-		from taxmate.uae_e_invoicing.api_classes.flick import map_to_flick_document
-
-		_, self.payload = build_payload_from_data(golden_transaction_data())
-		self.document = map_to_flick_document(self.payload)
-
-	def test_header(self):
-		self.assertEqual(self.document["document_identifier"], "SINV-0001")
-		self.assertEqual(self.document["document_type"], "380")
-		self.assertEqual(self.document["document_currency"], "AED")
-		self.assertEqual(self.document["issue_date"], "2026-08-27")
-		self.assertEqual(self.document["due_date"], "2026-09-26")
-
-	def test_receiving_party(self):
-		party = self.document["receiving_party"]
-		self.assertEqual(party["legal_name"], "Buyer FZ-LLC")
-		self.assertEqual(party["vat_number"], "100000000000004")
-		self.assertEqual(party["emirates_code"], "AUH")
-		self.assertEqual(party["country_code"], "AE")
-		self.assertIn({"type": "VAT-GROUP", "value": "1000000000"}, party.get("identifiers") or [])
-
-	def test_invoice_lines(self):
-		lines = self.document["invoice_lines"]
-		self.assertEqual(len(lines), 2)
-		self.assertEqual(lines[0]["vat_category"], "S")
-		self.assertEqual(lines[0]["sac_code"], "998311")
-		self.assertEqual(lines[1]["hs_code"], "85171200")
-		self.assertEqual(lines[0]["line_extension_amount"], 1000.0)
-
-	def test_monetary_total_and_payment_means(self):
-		total = self.document["legal_monetary_total"]
-		self.assertEqual(total["payable_amount"], 1450.0)
-		self.assertEqual(total["currency_id"], "AED")
-
-		means = self.document["payment_means"][0]
-		self.assertEqual(means["payment_means_code"], "30")
-		self.assertEqual(means["payee_financial_account"]["id"], "AE070331234567890123456")
-
-	def test_metadata_flags(self):
-		self.assertFalse(self.document["metadata"]["is_export"])
-		data = golden_transaction_data()
-		data["transaction_type_code"] = "10000001"
-		from taxmate.uae_e_invoicing.api_classes.flick import map_to_flick_document
-
-		_, payload = build_payload_from_data(data)
-		metadata = map_to_flick_document(payload)["metadata"]
-		self.assertTrue(metadata["is_ftz"])
-		self.assertTrue(metadata["is_export"])
-
-
 class TestIbtRules(unittest.TestCase):
 	"""IBG-14 / BTAE-01 checks aligned with ERPGulf, without their due-date-implies-frequency bug."""
 
@@ -488,3 +435,77 @@ class TestIbtRules(unittest.TestCase):
 		self.assertIn("buyer", msgs[0].lower())
 		self.assertEqual(buyer_fz_validation_messages({"free_trade_zone": True}, "FZ-99"), [])
 		self.assertEqual(buyer_fz_validation_messages({"free_trade_zone": False}, None), [])
+
+
+class TestComplyanceUnify(unittest.TestCase):
+	"""PINT-AE payload → Complyance Unify envelope. No network."""
+
+	def test_ordinary_invoice_uses_tax_invoice(self):
+		from taxmate.uae_e_invoicing.api_classes.complyance import build_unify_request
+
+		_, payload = build_payload_from_data(golden_transaction_data())
+		body = build_unify_request(
+			payload, source="taxmate:1.0", environment="sandbox", purpose="invoicing"
+		)
+		self.assertEqual(body["country"], "AE")
+		self.assertEqual(body["environment"], "sandbox")
+		self.assertEqual(body["purpose"], "invoicing")
+		self.assertEqual(body["source"], "taxmate:1.0")
+		self.assertEqual(body["documentType"], {"base": "tax_invoice", "modifiers": []})
+		self.assertIs(body["payload"], payload)
+
+	def test_uae_document_selections(self):
+		from taxmate.uae_e_invoicing.api_classes.complyance import document_type_for
+
+		cases = {
+			"380": ("tax_invoice", []),
+			"381": ("credit_note", []),
+			"480": ("tax_invoice", ["out_of_scope"]),
+			"81": ("credit_note", ["out_of_scope"]),
+			"389": ("tax_invoice", ["self_billed"]),
+			"361": ("credit_note", ["self_billed"]),
+		}
+		for code, (base, modifiers) in cases.items():
+			self.assertEqual(
+				document_type_for({"InvoiceTypeCode": code}),
+				{"base": base, "modifiers": modifiers},
+			)
+
+	def test_export_flag_adds_modifier(self):
+		from taxmate.uae_e_invoicing.api_classes.complyance import document_type_for
+
+		doc_type = document_type_for(
+			{"InvoiceTypeCode": "389", "InvoiceTransactionTypeCode": "00000001"}
+		)
+		self.assertEqual(doc_type["modifiers"], ["self_billed", "export"])
+
+	def test_source_splits_on_the_last_colon(self):
+		from taxmate.uae_e_invoicing.api_classes.complyance import (
+			ComplyanceSourceError,
+			parse_complyance_source,
+		)
+
+		self.assertEqual(parse_complyance_source("acme-erp:1.0.0"), "acme-erp:1.0.0")
+		with self.assertRaises(ComplyanceSourceError):
+			parse_complyance_source("taxmate")
+		with self.assertRaises(ComplyanceSourceError):
+			parse_complyance_source("tax mate:1.0")
+
+	def test_states(self):
+		from taxmate.uae_e_invoicing.api_classes.complyance import taxmate_status_for_state
+
+		self.assertEqual(taxmate_status_for_state("final_valid"), "Accepted")
+		self.assertEqual(taxmate_status_for_state("final_invalid"), "Rejected")
+		self.assertEqual(taxmate_status_for_state("rejected"), "Rejected")
+		self.assertEqual(taxmate_status_for_state("delivery_failed"), "Submitted")
+		self.assertEqual(taxmate_status_for_state("processing"), "Submitted")
+		self.assertIsNone(taxmate_status_for_state(""))
+
+	def test_map_asp_status_accepts_complyance_states(self):
+		from taxmate.uae_e_invoicing.utils.e_invoice import map_asp_status
+
+		self.assertEqual(map_asp_status("final_valid"), "Accepted")
+		self.assertEqual(map_asp_status("Accepted"), "Accepted")
+		self.assertEqual(map_asp_status("processing"), "Submitted")
+		self.assertEqual(map_asp_status("final_invalid"), "Rejected")
+		self.assertIsNone(map_asp_status(""))

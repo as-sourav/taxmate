@@ -1,9 +1,9 @@
 /**
  * Site-wide UAE e-invoice ASP settings (UAE Tax Settings Single).
  *
- * Importers: App.tsx /tax-settings. API: get_uae_tax_settings / save_uae_tax_settings
- * on get_catalog(). Not company VAT rates — those are Company Settings + Item Tax Templates.
- * User instruction: Fix Tax Settings — robust, from findings; production standard.
+ * Routes: App.tsx /tax-settings.
+ * API: get_uae_tax_settings / save_uae_tax_settings on get_catalog().
+ * Company VAT and Item Tax Templates live on their own screens.
  */
 
 import { useEffect, useId, useRef, useState } from "react";
@@ -14,7 +14,7 @@ import { METHOD, readableError } from "../../lib/frappe";
 import { useSession } from "../../lib/session";
 import { canEditTaxSettings } from "../../lib/roles";
 import { t } from "../../i18n/strings";
-import { Card, CheckField, ErrorBox, Field, Loading, PageHead, ReadRow } from "../../components/ui";
+import { Card, CheckField, ErrorBox, Field, Loading, PageHead } from "../../components/ui";
 import DocHistory from "../../components/DocHistory";
 
 type Settings = {
@@ -39,12 +39,9 @@ type Settings = {
 };
 
 type FormState = {
-  asp_provider: string;
   sandbox_mode: boolean;
   base_url: string;
   participant_id: string;
-  client_id: string;
-  client_secret: string;
   auth_key: string;
   webhook_secret: string;
   exclude_b2c_e_invoices: boolean;
@@ -56,12 +53,9 @@ type FormState = {
 
 function fromDoc(d: Settings): FormState {
   return {
-    asp_provider: d.asp_provider || "Sandbox",
     sandbox_mode: !!d.sandbox_mode,
     base_url: d.base_url || "",
     participant_id: d.participant_id || "",
-    client_id: d.client_id || "",
-    client_secret: "",
     auth_key: "",
     webhook_secret: "",
     exclude_b2c_e_invoices: d.exclude_b2c_e_invoices !== 0,
@@ -70,6 +64,14 @@ function fromDoc(d: Settings): FormState {
     archive_retention_years: d.archive_retention_years != null ? String(d.archive_retention_years) : "5",
     uae_storage_note: d.uae_storage_note || "",
   };
+}
+
+/** Match Complyance / parse_complyance_source: non-empty name and version around the last colon. */
+function isValidComplyanceSource(raw: string): boolean {
+  const value = raw.trim();
+  if (!value || /\s/.test(value)) return false;
+  const i = value.lastIndexOf(":");
+  return i > 0 && i < value.length - 1;
 }
 
 function secretHint(set: boolean | undefined): string {
@@ -116,12 +118,15 @@ export default function TaxSettings() {
     const problems: string[] = [];
     if (!Number.isFinite(sla) || sla < 1) problems.push(t("tax.err.sla"));
     if (!Number.isFinite(years) || years < 5) problems.push(t("tax.err.retention"));
-    if (form.asp_provider === "Flick" && !form.sandbox_mode && !form.base_url.trim()) {
-      problems.push(t("tax.err.baseUrl"));
+    if (!isValidComplyanceSource(form.participant_id)) {
+      problems.push(t("tax.err.source"));
     }
     const url = form.base_url.trim();
     if (url && !/^https:\/\//i.test(url)) {
       problems.push(t("tax.err.https"));
+    }
+    if (!form.auth_key.trim() && !doc?.has_auth_key) {
+      problems.push(t("tax.err.authKey"));
     }
     if (problems.length) {
       setSaveErr(problems);
@@ -130,18 +135,16 @@ export default function TaxSettings() {
     setSaveErr(null);
     setSaved(false);
     const payload: Record<string, unknown> = {
-      asp_provider: form.asp_provider,
+      asp_provider: "Complyance",
       sandbox_mode: form.sandbox_mode ? 1 : 0,
       base_url: form.base_url.trim(),
       participant_id: form.participant_id.trim(),
-      client_id: form.client_id.trim(),
       exclude_b2c_e_invoices: form.exclude_b2c_e_invoices ? 1 : 0,
       auto_draft_incoming_pi: form.auto_draft_incoming_pi ? 1 : 0,
       sla_days: sla,
       archive_retention_years: years,
       uae_storage_note: form.uae_storage_note.trim(),
     };
-    if (form.client_secret.trim()) payload.client_secret = form.client_secret.trim();
     if (form.auth_key.trim()) payload.auth_key = form.auth_key.trim();
     if (form.webhook_secret.trim()) payload.webhook_secret = form.webhook_secret.trim();
     try {
@@ -226,21 +229,13 @@ export default function TaxSettings() {
       <form id="tax-asp-form" onSubmit={(e) => void onSave(e)}>
         <Card title={t("tax.asp")} hint={t("tax.aspHint")}>
           <div className="grid2">
-            <Field label={t("tax.provider")}>
-              <select
-                className="ctl"
-                value={form.asp_provider}
-                disabled={!canEdit}
-                onChange={(e) => patch({ asp_provider: e.target.value })}
-              >
-                <option value="Sandbox">Sandbox</option>
-                <option value="Flick">Flick</option>
-              </select>
-            </Field>
-            <Field label={t("tax.participantId")} hint={t("tax.participantIdHint")}>
+            <Field label={t("tax.participantId")} hint={t("tax.sourceHint")} required htmlFor="tax-source">
               <input
+                id="tax-source"
                 className="ctl"
                 value={form.participant_id}
+                required
+                aria-required="true"
                 disabled={!canEdit}
                 onChange={(e) => patch({ participant_id: e.target.value })}
                 autoComplete="off"
@@ -268,6 +263,10 @@ export default function TaxSettings() {
             </div>
           </div>
         </Card>
+
+        <p className="od-note" style={{ marginBottom: 16 }}>
+          {t("tax.complyanceNote")}
+        </p>
 
         <Card title={t("tax.mandate")} hint={t("tax.mandateHint")}>
           <div className="grid2">
@@ -321,40 +320,22 @@ export default function TaxSettings() {
 
         <Card title={t("tax.auth")} hint={t("tax.authHint")}>
           <div className="grid2">
-            <Field label={t("tax.clientId")}>
-              <input
-                className="ctl"
-                value={form.client_id}
-                disabled={!canEdit}
-                onChange={(e) => patch({ client_id: e.target.value })}
-                autoComplete="off"
-              />
-            </Field>
-            <Field label={t("tax.clientSecret")} hint={secretHint(doc?.has_client_secret)}>
-              <input
-                className="ctl"
-                type="password"
-                value={form.client_secret}
-                disabled={!canEdit}
-                onChange={(e) => patch({ client_secret: e.target.value })}
-                placeholder={doc?.has_client_secret ? "••••••••" : ""}
-                autoComplete="new-password"
-              />
-            </Field>
-            <Field label={t("tax.authKey")} hint={secretHint(doc?.has_auth_key)}>
+            <Field
+              label={t("tax.authKey")}
+              hint={`${t("tax.authKeyHint")} ${secretHint(doc?.has_auth_key)}`}
+              required={!doc?.has_auth_key}
+            >
               <input
                 className="ctl"
                 type="password"
                 value={form.auth_key}
                 disabled={!canEdit}
+                required={!doc?.has_auth_key}
                 onChange={(e) => patch({ auth_key: e.target.value })}
                 placeholder={doc?.has_auth_key ? "••••••••" : ""}
                 autoComplete="new-password"
               />
             </Field>
-            {doc?.token_expiry ? (
-              <ReadRow k={t("tax.tokenExpiry")} v={doc.token_expiry} />
-            ) : null}
           </div>
         </Card>
 
@@ -371,27 +352,8 @@ export default function TaxSettings() {
                 autoComplete="new-password"
               />
             </Field>
-            <ReadRow k={t("tax.webhookSub")} v={doc?.webhook_subscription_id || "—"} />
           </div>
         </Card>
-
-        {doc?.participant_details ? (
-          <Card title={t("tax.participant")} hint={t("tax.participantHint")}>
-            <pre
-              className="ctl"
-              style={{
-                margin: 0,
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                maxHeight: 240,
-                overflow: "auto",
-                fontSize: 12,
-              }}
-            >
-              {doc.participant_details}
-            </pre>
-          </Card>
-        ) : null}
 
         {canEdit ? (
           <div style={{ marginTop: 8, marginBottom: 24 }}>

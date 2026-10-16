@@ -6,38 +6,6 @@
 frappe.ui.form.on("Company", {
 	refresh(frm) {
 		taxmate.show_uae_readiness(frm);
-		if (!frm.is_new() && frm.doc.country === "United Arab Emirates") {
-			frm.add_custom_button(
-				__("Verify Peppol ID"),
-				() => {
-					if (!frm.doc.uae_peppol_id) {
-						frappe.msgprint({
-							title: __("Peppol Participant ID"),
-							indicator: "orange",
-							message: __("Set Peppol Participant ID on the company first."),
-						});
-						return;
-					}
-					frappe.call({
-						method: "taxmate.uae_e_invoicing.utils.participant.lookup_peppol_participant",
-						args: { peppol_id: frm.doc.uae_peppol_id },
-						freeze: true,
-						freeze_message: __("Looking up the Peppol directory..."),
-						callback(r) {
-							if (!r.message) return;
-							frappe.msgprint({
-								title: __("Peppol Directory"),
-								indicator: r.message.registered !== false ? "green" : "red",
-								message: `<pre>${frappe.utils.escape_html(
-									JSON.stringify(r.message, null, 2)
-								)}</pre>`,
-							});
-						},
-					});
-				},
-				__("UAE E-Invoice")
-			);
-		}
 	},
 	country(frm) {
 		taxmate.show_uae_readiness(frm);

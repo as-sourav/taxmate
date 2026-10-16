@@ -9,28 +9,40 @@ from frappe.utils.file_manager import save_file
 
 from taxmate.uae_e_invoicing.utils.pint_ae import build_pint_ae_payload, payload_to_json
 
-# ASP status strings (lowercased) -> TaxMate status
+# ASP status strings (lowercased) -> TaxMate status.
+# Includes Complyance Unify ``data.state`` values for defense in depth when
+# callers pass the raw state instead of the adapter's mapped ``status``.
 ASP_STATUS_MAP = {
 	"submitted": "Submitted",
 	"validated": "Submitted",
+	"processing": "Submitted",
+	"delivery_success": "Submitted",
+	"delivery_failed": "Submitted",
 	"accepted": "Accepted",
 	"delivered": "Accepted",
+	"final_valid": "Accepted",
 	"rejected": "Rejected",
+	"final_invalid": "Rejected",
 	"failed": "Failed",
 }
 
 
+def map_asp_status(asp_status: str | None) -> str | None:
+	"""Map an ASP status or Complyance state onto a TaxMate e-invoice status."""
+	key = str(asp_status or "").strip()
+	if not key:
+		return None
+	# Adapter may already return TaxMate title-case.
+	if key in ("Queued", "Submitted", "Accepted", "Rejected", "Failed"):
+		return key
+	return ASP_STATUS_MAP.get(key.lower())
+
+
 def get_api():
-	"""Instantiate the ASP adapter selected in UAE Tax Settings."""
-	provider = frappe.db.get_single_value("UAE Tax Settings", "asp_provider") or "Sandbox"
-	if provider == "Flick":
-		from taxmate.uae_e_invoicing.api_classes.flick import FlickAPI
+	"""Complyance is the only ASP. Payloads stay PINT-AE, the UAE specification."""
+	from taxmate.uae_e_invoicing.api_classes.complyance import ComplyanceAPI
 
-		return FlickAPI()
-
-	from taxmate.uae_e_invoicing.api_classes.sandbox import SandboxAPI
-
-	return SandboxAPI()
+	return ComplyanceAPI()
 
 
 def is_e_invoice_applicable(doc) -> bool:
@@ -134,7 +146,7 @@ def generate_and_submit(doc) -> str:
 		_set_invoice_status(doc, "Failed", log.name)
 		return log.name
 
-	status = ASP_STATUS_MAP.get(str(result.get("status", "")).lower(), "Submitted")
+	status = map_asp_status(result.get("status")) or "Submitted"
 	updates = {
 		"status": status,
 		"asp_document_id": result.get("document_id"),
@@ -177,11 +189,11 @@ def sync_status_from_asp(log_name: str) -> str | None:
 		return None
 
 	asp_status = result.get("status") or result.get("document_status") or result.get("documentStatus") or ""
-	mapped = ASP_STATUS_MAP.get(str(asp_status).lower())
+	mapped = map_asp_status(asp_status)
 	if not mapped:
 		return None
 
-	apply_status_update(log.asp_document_id, asp_status, response=result)
+	apply_status_update(log.asp_document_id, mapped, response=result)
 	return mapped
 
 
@@ -191,7 +203,7 @@ def apply_status_update(asp_document_id: str, asp_status: str, response: dict | 
 	if not log_name:
 		return None
 
-	status = ASP_STATUS_MAP.get(str(asp_status).lower())
+	status = map_asp_status(asp_status)
 	if not status:
 		return None
 

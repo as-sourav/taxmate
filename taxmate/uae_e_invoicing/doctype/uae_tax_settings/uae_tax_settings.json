@@ -37,11 +37,13 @@
    "label": "Sandbox Mode"
   },
   {
-   "default": "Sandbox",
+   "default": "Complyance",
    "fieldname": "asp_provider",
    "fieldtype": "Select",
+   "hidden": 1,
    "label": "ASP Provider",
-   "options": "Sandbox\nFlick"
+   "options": "Complyance",
+   "read_only": 1
   },
   {
    "fieldname": "column_break_api",
@@ -54,9 +56,10 @@
    "translatable": 0
   },
   {
+   "description": "Complyance source as name:version, for example taxmate:1.0. The same value is sent on every Unify request.",
    "fieldname": "participant_id",
    "fieldtype": "Data",
-   "label": "Participant ID",
+   "label": "Source",
    "translatable": 0
   },
   {
@@ -76,7 +79,7 @@
    "label": "OAuth2 Client Secret"
   },
   {
-   "description": "Static provider auth key (e.g. X-Flick-Auth-Key). Used when OAuth2 credentials are not set.",
+   "description": "Complyance API key, sent as Authorization: Bearer.",
    "fieldname": "auth_key",
    "fieldtype": "Password",
    "label": "Auth Key"

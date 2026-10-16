@@ -227,7 +227,7 @@ _NAV_PAGES: tuple[dict[str, str], ...] = (
 	{
 		"label": "E-Invoice ASP",
 		"route": "/tax-settings",
-		"keywords": "asp uae tax settings e-invoice einvoice flick sandbox peppol access point",
+		"keywords": "asp uae tax settings e-invoice einvoice complyance pint-ae access point",
 	},
 	{
 		"label": "Team",
