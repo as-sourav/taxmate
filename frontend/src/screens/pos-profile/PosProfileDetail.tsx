@@ -111,7 +111,7 @@ export default function PosProfileDetail() {
         ) : null}
         {editing ? (
           <Field label={t("posp.col.warehouse")}>
-            <LinkField doctype={DT.warehouse} value={warehouse} onChange={setWarehouse} placeholder="Warehouse" />
+            <LinkField doctype={DT.warehouse} value={warehouse} onChange={setWarehouse} placeholder={t("posp.ph.warehouse")} />
           </Field>
         ) : (
           <ReadRow k={t("posp.col.warehouse")} v={data.warehouse || "—"} />

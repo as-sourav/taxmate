@@ -2,6 +2,7 @@
  * fetch for callers that skip frappe-react-sdk (multipart uploads).
  * Web: plain fetch. Native: workspace origin only, TaxMate token, no cookies.
  */
+import { t } from "../i18n/strings";
 import { isNative, MOBILE_BUILD, signalMobile } from "./platform";
 import { authHeader, getWorkspace } from "./session";
 
@@ -12,7 +13,7 @@ export function apiFetch(path: string, init: RequestInit = {}): Promise<Response
 
 async function nativeFetch(path: string, init: RequestInit): Promise<Response> {
   const workspace = getWorkspace();
-  if (!workspace) throw new Error("No workspace");
+  if (!workspace) throw new Error(t("mob.err.noWorkspace"));
   const url = new URL(path, `${workspace}/`);
   if (url.origin !== new URL(workspace).origin) {
     throw new Error(`apiFetch refused a request to ${url.origin}: not the workspace`);

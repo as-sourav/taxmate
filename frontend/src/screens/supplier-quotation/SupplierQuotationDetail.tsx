@@ -54,7 +54,7 @@ export default function SupplierQuotationDetail() {
     try {
       const res = await makePo.call({ source_name: name });
       const mapped = res?.message;
-      if (!mapped) throw new Error("Mapper returned nothing.");
+      if (!mapped) throw new Error(t("doc.err.mapFailed"));
       const body: Record<string, unknown> = { ...(mapped as Record<string, unknown>) };
       delete body.name; delete body.doctype; delete body.__islocal; delete body.__unsaved;
       const created = await create.createDoc(DT.purchaseOrder, body);

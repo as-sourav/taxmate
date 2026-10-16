@@ -117,7 +117,7 @@ export default function LoyaltyProgramForm() {
             </select>
           </Field>
           <Field label={t("lp.col.company")}>
-            <LinkField doctype="Company" value={company} onChange={setCompany} placeholder="Company" />
+            <LinkField doctype="Company" value={company} onChange={setCompany} placeholder={t("lp.ph.company")} />
           </Field>
           <Field label={t("lp.col.from")}>
             <input className="inp" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
@@ -134,7 +134,7 @@ export default function LoyaltyProgramForm() {
               onChange={(e) => setExpiry(parseNum(e.target.value))} />
           </Field>
           <Field label={t("lp.col.expenseAccount")}>
-            <LinkField doctype={DT.account} value={expenseAccount} onChange={setExpenseAccount} placeholder="Expense Account" />
+            <LinkField doctype={DT.account} value={expenseAccount} onChange={setExpenseAccount} placeholder={t("lp.ph.expenseAccount")} />
           </Field>
         </Card>
         <FormActions

@@ -534,7 +534,7 @@ export default function CompanySettings() {
                   <Field label={t("cs.valuationMethod")}>
                     <select className="ctl" value={val("valuation_method") || "FIFO"} onChange={setText("valuation_method")} disabled={!canAccounts}>
                       <option value="FIFO">FIFO</option>
-                      <option value="Moving Average">Moving Average</option>
+                      <option value="Moving Average">{t("item.valuation.moving")}</option>
                       <option value="LIFO">LIFO</option>
                     </select>
                   </Field>
@@ -636,17 +636,17 @@ export default function CompanySettings() {
                   <Field label={t("cs.revenueBand")}>
                     <select className="ctl" value={val("uae_e_invoice_revenue_band")} onChange={setText("uae_e_invoice_revenue_band")} disabled={!canFull}>
                       <option value="">—</option>
-                      <option value="Below AED 50,000,000">Below AED 50,000,000</option>
-                      <option value="AED 50,000,000 or more">AED 50,000,000 or more</option>
+                      <option value="Below AED 50,000,000">{t("co.einv.bandBelow")}</option>
+                      <option value="AED 50,000,000 or more">{t("co.einv.bandAtOrAbove")}</option>
                     </select>
                   </Field>
                   <Field label={t("cs.cohortOverride")}>
                     <select className="ctl" value={val("uae_e_invoice_cohort_override") || "Auto"} onChange={setText("uae_e_invoice_cohort_override")} disabled={!canFull}>
-                      <option value="Auto">Auto</option>
-                      <option value="Pilot">Pilot</option>
-                      <option value="Large">Large</option>
-                      <option value="SME">SME</option>
-                      <option value="Government">Government</option>
+                      <option value="Auto">{t("co.einv.cohortAuto")}</option>
+                      <option value="Pilot">{t("co.einv.cohortPilot")}</option>
+                      <option value="Large">{t("co.einv.cohortLarge")}</option>
+                      <option value="SME">{t("co.einv.cohortSme")}</option>
+                      <option value="Government">{t("co.einv.cohortGovernment")}</option>
                     </select>
                   </Field>
                 </div>
@@ -659,8 +659,8 @@ export default function CompanySettings() {
                   <Field label={t("cs.vatFrequency")} hint={t("cs.vatFrequencyHelp")}>
                     <select className="ctl" value={freq} onChange={setText("taxmate_vat_filing_frequency")} disabled={!canAccounts}>
                       <option value="">—</option>
-                      <option value="Monthly">Monthly</option>
-                      <option value="Quarterly">Quarterly</option>
+                      <option value="Monthly">{t("co.vat.freqMonthly")}</option>
+                      <option value="Quarterly">{t("co.vat.freqQuarterly")}</option>
                     </select>
                   </Field>
                   {freq === "Quarterly" && (
@@ -710,7 +710,7 @@ export default function CompanySettings() {
                       value={val("role_allowed_for_frozen_entries")}
                       onChange={setText("role_allowed_for_frozen_entries")}
                       disabled={!canAccounts}
-                      placeholder="Accounts Manager"
+                      placeholder={t("co.ph.accountsManager")}
                     />
                   </Field>
                 </div>

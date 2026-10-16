@@ -39,7 +39,7 @@ export default function LeadDetail() {
     try {
       const res = await convertCall.call({ lead_name: name });
       const mapped = res?.message;
-      if (!mapped) throw new Error("Conversion returned nothing.");
+      if (!mapped) throw new Error(t("lead.err.convertFailed"));
       const body: Record<string, unknown> = { ...(mapped as Record<string, unknown>) };
       delete body.name; delete body.doctype; delete body.__islocal; delete body.__unsaved;
       const created = await create.createDoc(DT.customer, body);

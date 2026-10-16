@@ -112,10 +112,10 @@ export default function LeadForm() {
             <Field label={t("lead.request")}>
               <select className="ctl" value={form.request_type} onChange={(e) => setField("request_type", e.target.value)}>
                 <option value="" />
-                <option value="Product Enquiry">Product Enquiry</option>
-                <option value="Request for Information">Request for Information</option>
-                <option value="Suggestions">Suggestions</option>
-                <option value="Other">Other</option>
+                <option value="Product Enquiry">{t("lead.src.productEnquiry")}</option>
+                <option value="Request for Information">{t("lead.src.rfi")}</option>
+                <option value="Suggestions">{t("lead.src.suggestions")}</option>
+                <option value="Other">{t("lead.src.other")}</option>
               </select>
             </Field>
             <Field label={t("lead.col.status")}>

@@ -25,11 +25,13 @@ import { FilterBar, SearchFilter, SelectFilter } from "../../components/filters"
 const PAGE = 20;
 
 const STATUS_OPTIONS = [
-  { value: "Failed", label: "Failed" },
-  { value: "Rejected", label: "Rejected" },
-  { value: "Pending", label: "Pending" },
-  { value: "Generated", label: "Generated" },
-  { value: "Accepted", label: "Accepted" },
+  /* value = the server's own status word, never translated.
+     labelKey is resolved at render time — see the SelectFilter below. */
+  { value: "Failed", labelKey: "einv.st.failed" },
+  { value: "Rejected", labelKey: "einv.st.rejected" },
+  { value: "Pending", labelKey: "einv.st.pending" },
+  { value: "Generated", labelKey: "einv.st.generated" },
+  { value: "Accepted", labelKey: "einv.st.accepted" },
 ];
 
 type Row = {
@@ -130,7 +132,7 @@ export default function EInvoiceLog() {
   const columns: Column<Row>[] = [
     {
       key: "select",
-      header: <input type="checkbox" checked={selected.size === rows.length && rows.length > 0} onChange={toggleAll} aria-label="Select all" />,
+      header: <input type="checkbox" checked={selected.size === rows.length && rows.length > 0} onChange={toggleAll} aria-label={t("list.selectAll")} />,
       cell: (r) => <input type="checkbox" checked={selected.has(r.name)} onChange={() => toggleSelect(r.name)} aria-label={r.name} />,
     },
     { key: "reference_name", header: t("elog.col.invoice"), cell: (r) => r.reference_name ?? "—" },
@@ -140,7 +142,7 @@ export default function EInvoiceLog() {
       cell: (r) => <Pill cls={elogPill(r.status)}>{r.status ?? "—"}</Pill>,
     },
     { key: "modified", header: t("elog.col.updated"), cell: (r) => datetime(r.modified) },
-    { key: "asp_document_id", header: "ASP ID", cell: (r) => r.asp_document_id ? r.asp_document_id.slice(0, 12) + "…" : "—" },
+    { key: "asp_document_id", header: t("einv.col.aspId"), cell: (r) => r.asp_document_id ? r.asp_document_id.slice(0, 12) + "…" : "—" },
   ];
 
   return (
@@ -150,11 +152,11 @@ export default function EInvoiceLog() {
       <Card bodyClass={null as unknown as string}>
         <FilterBar>
           <SearchFilter value={q} onChange={(v) => set("q", v)} placeholder={t("elog.search")} />
-          <SelectFilter value={statusFilter} onChange={(v) => set("status", v)} allLabel={t("elog.col.status")} options={STATUS_OPTIONS} />
+          <SelectFilter value={statusFilter} onChange={(v) => set("status", v)} allLabel={t("elog.col.status")} options={STATUS_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))} />
         </FilterBar>
         {selected.size > 0 && (
           <div className="flex gap-2 p-2 bg-surface-muted border-b">
-            <span className="text-sm text-muted self-center">{selected.size} selected</span>
+            <span className="text-sm text-muted self-center">{selected.size} {t("inv.bulk.selected")}</span>
             <button className="btn btn-secondary btn-sm" onClick={retrySelected} disabled={busy}>
               {busy ? t("common.saving") : t("elog.retry")}
             </button>

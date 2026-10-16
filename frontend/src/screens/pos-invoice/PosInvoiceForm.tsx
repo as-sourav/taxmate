@@ -147,7 +147,7 @@ export default function PosInvoiceForm() {
           {lines.map((ln, i) => (
             <div key={i} className="flex gap-2 mb-2 items-end">
               <Field label={i === 0 ? t("inv.col.item") : ""}>
-                <LinkField doctype={DT.item} value={ln.item_code} onChange={(v) => setLine(i, "item_code", v)} placeholder="Item" />
+                <LinkField doctype={DT.item} value={ln.item_code} onChange={(v) => setLine(i, "item_code", v)} placeholder={t("pos.ph.item")} />
               </Field>
               <Field label={i === 0 ? t("inv.col.qty") : ""}>
                 <input className="inp" type="number" min={0.001} step={0.001} value={ln.qty}
@@ -171,7 +171,7 @@ export default function PosInvoiceForm() {
                   doctype={DT.modeOfPayment}
                   value={p.mode_of_payment}
                   onChange={(v) => setPayments((ps) => ps.map((x, j) => j === i ? { ...x, mode_of_payment: v } : x))}
-                  placeholder="Mode of Payment"
+                  placeholder={t("pos.ph.mop")}
                 />
               </Field>
               <Field label={i === 0 ? t("pos.col.amount") : ""}>

@@ -160,8 +160,8 @@ export default function LandedCostVoucherForm() {
                 render: (r, i) => (
                   <select className="ctl mini" value={r.receipt_document_type}
                     onChange={(e) => setReceipts((rs) => rs.map((x, j) => j === i ? { ...x, receipt_document_type: e.target.value as "Purchase Receipt" | "Purchase Invoice" } : x))}>
-                    <option value="Purchase Receipt">Purchase Receipt</option>
-                    <option value="Purchase Invoice">Purchase Invoice</option>
+                    <option value="Purchase Receipt">{t("lcv.src.purchaseReceipt")}</option>
+                    <option value="Purchase Invoice">{t("lcv.src.purchaseInvoice")}</option>
                   </select>
                 ),
               },

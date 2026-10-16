@@ -49,7 +49,7 @@ export default function PosReturnForm() {
     try {
       const res = await returnCall.call({ source_name: name, doctype: DT.salesInvoice });
       const mapped = res?.message;
-      if (!mapped) throw new Error("Return mapper returned nothing");
+      if (!mapped) throw new Error(t("pos.err.returnFailed"));
       const body: Record<string, unknown> = { ...(mapped as Record<string, unknown>), doctype: DT.posInvoice };
       delete body.name; delete body.__islocal; delete body.__unsaved;
       const created = await insert.createDoc(DT.posInvoice, body);
