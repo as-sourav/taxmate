@@ -19,23 +19,33 @@ from taxmate.api.users import (
 	get_user,
 	invite_user,
 	list_users,
+	onboard_company_owner,
 	set_user_enabled,
 	set_user_role,
 	update_profile,
 	update_user,
 )
+from taxmate.setup.company_owner import OWNER_FIELD, ensure_company_owner_field
 from taxmate.setup.spa_roles import MARKER, ensure_spa_roles, spa_role_of
 
 
 class TestSpaUsers(FrappeTestCase):
 	def setUp(self):
 		ensure_spa_roles()
+		ensure_company_owner_field()
+		self._owner_names: list[str] = []
 
-	def _use_company(self, company: str) -> None:
+	def tearDown(self):
+		frappe.set_user("Administrator")
+		for name in getattr(self, "_owner_names", []):
+			self._delete(name)
+
+	def _use_company(self, company: str, user: str | None = None) -> None:
 		from taxmate.utils.company import ACTIVE_COMPANY_KEY
 
-		frappe.defaults.set_user_default(ACTIVE_COMPANY_KEY, company, frappe.session.user)
-		frappe.defaults.set_user_default("company", company, frappe.session.user)
+		user = user or frappe.session.user
+		frappe.defaults.set_user_default(ACTIVE_COMPANY_KEY, company, user)
+		frappe.defaults.set_user_default("company", company, user)
 
 	def _company(self) -> str:
 		from taxmate.utils.company import get_default_company
@@ -47,8 +57,27 @@ class TestSpaUsers(FrappeTestCase):
 			self._use_company(company)
 		return company
 
+	def _act_as_company_owner(self, company: str | None = None) -> dict:
+		"""Administrator onboards a primary owner, then switch session to them."""
+		frappe.set_user("Administrator")
+		company = company or self._company()
+		self._use_company(company, "Administrator")
+		email = f"tm-owner-{uuid.uuid4().hex[:8]}@example.com"
+		owner = onboard_company_owner(
+			company=company,
+			email=email,
+			first_name="TaxMate",
+			last_name="Owner",
+			send_welcome_email=0,
+		)
+		self._owner_names.append(owner["name"])
+		self._use_company(company, owner["name"])
+		frappe.set_user(owner["name"])
+		return owner
+
 	def _invite(self, spa_role: str = "clerk") -> dict:
-		self._company()
+		if frappe.session.user == "Administrator" or "System Manager" in frappe.get_roles():
+			self._act_as_company_owner()
 		email = f"tm-{spa_role}-{uuid.uuid4().hex[:8]}@example.com"
 		return invite_user(
 			email=email,
@@ -60,13 +89,79 @@ class TestSpaUsers(FrappeTestCase):
 
 	def _delete(self, name: str) -> None:
 		if name and frappe.db.exists("User", name):
+			# Clear company owner link if this user is primary owner.
+			for company in frappe.get_all(
+				"Company", filters={OWNER_FIELD: name}, pluck="name"
+			):
+				frappe.db.set_value("Company", company, OWNER_FIELD, None, update_modified=False)
 			frappe.db.delete("User Permission", {"user": name})
 			frappe.delete_doc("User", name, force=True, ignore_permissions=True)
 
 	def test_session_returns_spa_role(self):
 		session = get_session()
-		self.assertIn(session["spa_role"], ("owner", "accountant", "clerk", "viewer"))
-		self.assertEqual(session["spa_role"], "owner")
+		self.assertTrue(session.get("is_app_provider"))
+		self.assertFalse(session.get("spa_roles"))
+		self.assertIn(session.get("spa_role"), (None, "", False))
+
+
+	def test_administrator_cannot_invite(self):
+		frappe.set_user("Administrator")
+		self._company()
+		with self.assertRaises(frappe.PermissionError):
+			invite_user(
+				email=f"tm-admin-invite-{uuid.uuid4().hex[:8]}@example.com",
+				first_name="Nope",
+				spa_role="clerk",
+				send_welcome_email=0,
+			)
+
+	def test_onboard_company_owner_maps_user(self):
+		frappe.set_user("Administrator")
+		company = self._company()
+		email = f"tm-onboard-{uuid.uuid4().hex[:8]}@example.com"
+		created = onboard_company_owner(
+			company=company,
+			email=email,
+			first_name="Org",
+			last_name="Owner",
+			send_welcome_email=0,
+		)
+		try:
+			self.assertEqual(created["name"], email)
+			self.assertEqual(created["spa_role"], "owner")
+			self.assertEqual(frappe.db.get_value("Company", company, OWNER_FIELD), email)
+			self.assertIn(MARKER["owner"], frappe.get_roles(email))
+			rows = frappe.get_all(
+				"User Permission",
+				filters={"user": email, "allow": "Company"},
+				pluck="for_value",
+			)
+			self.assertEqual(rows, [company])
+			self.assertNotEqual(email, "Administrator")
+			frappe.set_user(email)
+			self._use_company(company, email)
+			clerk = invite_user(
+				email=f"tm-clerk-{uuid.uuid4().hex[:8]}@example.com",
+				first_name="Clerk",
+				spa_role="clerk",
+				send_welcome_email=0,
+			)
+			self.assertEqual(clerk["spa_role"], "clerk")
+			self._delete(clerk["name"])
+		finally:
+			frappe.set_user("Administrator")
+			self._delete(email)
+
+	def test_cannot_onboard_administrator_as_owner(self):
+		frappe.set_user("Administrator")
+		company = self._company()
+		with self.assertRaises(frappe.ValidationError):
+			onboard_company_owner(
+				company=company,
+				email="Administrator",
+				first_name="Admin",
+				send_welcome_email=0,
+			)
 
 	def test_catalog_exposes_user_actions_not_user_resource(self):
 		catalog = get_catalog()
@@ -77,6 +172,7 @@ class TestSpaUsers(FrappeTestCase):
 		self.assertIn("taxmate.api.users.list_users", methods)
 		self.assertIn("taxmate.api.users.get_user", methods)
 		self.assertIn("taxmate.api.users.invite_user", methods)
+		self.assertIn("taxmate.api.users.onboard_company_owner", methods)
 		self.assertIn("taxmate.api.users.update_user", methods)
 		self.assertIn("taxmate.api.users.set_user_role", methods)
 		self.assertIn("taxmate.api.users.set_user_enabled", methods)
@@ -130,6 +226,7 @@ class TestSpaUsers(FrappeTestCase):
 		"""Multiple TaxMate markers are stored; Frappe unions DocPerms (highest wins UI)."""
 		from taxmate.setup.spa_roles import MARKER, apply_spa_roles, spa_roles_of
 
+		self._act_as_company_owner()
 		email = f"tm-multi-{uuid.uuid4().hex[:8]}@example.com"
 		created = invite_user(
 			email=email,
@@ -165,6 +262,7 @@ class TestSpaUsers(FrappeTestCase):
 		self.assertTrue(frappe.get_doc("User", "Administrator").has_desk_access())
 
 	def test_invite_stores_mobile_and_last_name(self):
+		self._act_as_company_owner()
 		email = f"tm-full-{uuid.uuid4().hex[:8]}@example.com"
 		created = invite_user(
 			email=email,
@@ -197,13 +295,18 @@ class TestSpaUsers(FrappeTestCase):
 		user.append("roles", {"role": "System Manager"})
 		user.save(ignore_permissions=True)
 		try:
+			# As Administrator (provider), Team writes are denied.
 			with self.assertRaises(frappe.PermissionError):
 				set_user_role(user=user.name, spa_role="clerk")
 			with self.assertRaises(frappe.PermissionError):
 				set_user_enabled(user=user.name, enabled=0)
+			owner = self._act_as_company_owner()
+			with self.assertRaises(frappe.PermissionError):
+				set_user_role(user=user.name, spa_role="clerk")
 			names = {row["name"] for row in list_users()}
 			self.assertNotIn(user.name, names)
 		finally:
+			frappe.set_user("Administrator")
 			self._delete(user.name)
 
 	def test_accountant_cannot_invite(self):
@@ -343,10 +446,17 @@ class TestSpaUsers(FrappeTestCase):
 		if len(names) < 2:
 			self.skipTest("needs two companies")
 		first, second = names[0], names[1]
-		self._use_company(first)
-		created = self._invite("accountant")
+		self._act_as_company_owner(first)
+		created = invite_user(
+			email=f"tm-accountant-{uuid.uuid4().hex[:8]}@example.com",
+			first_name="TaxMate",
+			last_name="Accountant",
+			spa_role="accountant",
+			send_welcome_email=0,
+		)
 		try:
-			self._use_company(second)
+			frappe.set_user("Administrator")
+			owner2 = self._act_as_company_owner(second)
 			again = invite_user(
 				email=created["name"],
 				first_name="TaxMate",
@@ -362,7 +472,8 @@ class TestSpaUsers(FrappeTestCase):
 				)
 			)
 			self.assertEqual(rows, {first, second})
-			with self.assertRaises(frappe.ValidationError):
+			# Multi-company accountant is not fully owned by either company owner.
+			with self.assertRaises(frappe.PermissionError):
 				set_user_role(user=created["name"], spa_role="owner")
 			frappe.set_user(created["name"])
 			from taxmate.api.owner_dashboard import get_owner_dashboard
@@ -381,21 +492,32 @@ class TestSpaUsers(FrappeTestCase):
 		if len(names) < 2:
 			self.skipTest("needs two companies")
 		first, second = names[0], names[1]
-		self._use_company(first)
-		owner = self._invite("owner")
-		home = self._invite("clerk")
-		self._use_company(second)
-		other = self._invite("clerk")
+		owner = self._act_as_company_owner(first)
+		home = invite_user(
+			email=f"tm-home-{uuid.uuid4().hex[:8]}@example.com",
+			first_name="Home",
+			spa_role="clerk",
+			send_welcome_email=0,
+		)
+		frappe.set_user("Administrator")
+		other_owner = self._act_as_company_owner(second)
+		other = invite_user(
+			email=f"tm-other-{uuid.uuid4().hex[:8]}@example.com",
+			first_name="Other",
+			spa_role="clerk",
+			send_welcome_email=0,
+		)
 		try:
 			frappe.set_user(owner["name"])
+			self._use_company(first, owner["name"])
 			listed = {row["name"] for row in list_users()}
 			self.assertIn(home["name"], listed)
 			self.assertNotIn(other["name"], listed)
 		finally:
 			frappe.set_user("Administrator")
-			self._delete(owner["name"])
 			self._delete(home["name"])
 			self._delete(other["name"])
+			self._delete(other_owner["name"])
 
 
 	def test_accountant_team_list_follows_active_company(self):
@@ -404,17 +526,33 @@ class TestSpaUsers(FrappeTestCase):
 		if len(names) < 2:
 			self.skipTest("needs two companies")
 		first, second = names[0], names[1]
-		self._use_company(first)
-		accountant = self._invite("accountant")
-		home = self._invite("clerk")
-		self._use_company(second)
+		self._act_as_company_owner(first)
+		accountant = invite_user(
+			email=f"tm-acc-{uuid.uuid4().hex[:8]}@example.com",
+			first_name="TaxMate",
+			spa_role="accountant",
+			send_welcome_email=0,
+		)
+		home = invite_user(
+			email=f"tm-home-{uuid.uuid4().hex[:8]}@example.com",
+			first_name="Home",
+			spa_role="clerk",
+			send_welcome_email=0,
+		)
+		frappe.set_user("Administrator")
+		self._act_as_company_owner(second)
 		invite_user(
 			email=accountant["name"],
 			first_name="TaxMate",
 			spa_role="accountant",
 			send_welcome_email=0,
 		)
-		other = self._invite("clerk")
+		other = invite_user(
+			email=f"tm-other-{uuid.uuid4().hex[:8]}@example.com",
+			first_name="Other",
+			spa_role="clerk",
+			send_welcome_email=0,
+		)
 		try:
 			from taxmate.utils.company import set_active_company
 
@@ -442,14 +580,20 @@ class TestSpaUsers(FrappeTestCase):
 		if len(names) < 2:
 			self.skipTest("needs two companies")
 		first, second = names[0], names[1]
-		self._use_company(first)
-		owner = self._invite("owner")
-		self._use_company(second)
-		other = self._invite("clerk")
+		owner = self._act_as_company_owner(first)
+		frappe.set_user("Administrator")
+		self._act_as_company_owner(second)
+		other = invite_user(
+			email=f"tm-bclerk-{uuid.uuid4().hex[:8]}@example.com",
+			first_name="B",
+			spa_role="clerk",
+			send_welcome_email=0,
+		)
 		try:
 			from taxmate.utils.company import set_active_company
 
 			frappe.set_user(owner["name"])
+			self._use_company(first, owner["name"])
 			set_active_company(first)
 			with self.assertRaises(frappe.ValidationError):
 				get_user(user=other["name"])
@@ -479,9 +623,15 @@ class TestSpaUsers(FrappeTestCase):
 		if len(names) < 2:
 			self.skipTest("needs two companies")
 		first, second = names[0], names[1]
-		self._use_company(first)
-		created = self._invite("accountant")
-		self._use_company(second)
+		self._act_as_company_owner(first)
+		created = invite_user(
+			email=f"tm-acc2-{uuid.uuid4().hex[:8]}@example.com",
+			first_name="TaxMate",
+			spa_role="accountant",
+			send_welcome_email=0,
+		)
+		frappe.set_user("Administrator")
+		self._act_as_company_owner(second)
 		invite_user(
 			email=created["name"],
 			first_name="TaxMate",

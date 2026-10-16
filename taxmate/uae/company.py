@@ -7,6 +7,7 @@ import frappe
 from taxmate.uae.constants import UAE_COUNTRY
 from taxmate.uae.setup import ensure_company_uae_ready
 from taxmate.uae.validation import validate_company_trn
+from taxmate.setup.company_owner import validate_company_owner
 
 
 def after_insert(doc, method=None):
@@ -20,6 +21,7 @@ def on_update(doc, method=None):
 
 def validate(doc, method=None):
 	validate_company_trn(doc, method)
+	validate_company_owner(doc)
 
 
 def _handle_company(doc):

@@ -236,9 +236,11 @@ def addon_roles_of(user: str | None = None) -> list[str]:
 def spa_roles_of(user: str | None = None) -> list[str]:
 	"""All TaxMate SPA markers on the user, highest first. System Manager → owner only."""
 	user = user or frappe.session.user
+	# Administrator is always the app provider — never a company SPA role,
+	# even if TaxMate markers were wrongly assigned on the User.
+	if user == "Administrator":
+		return []
 	roles = set(frappe.get_roles(user))
-	if "System Manager" in roles:
-		return ["owner"]
 	found: list[str] = []
 	for key in SPA_ROLES:
 		if MARKER[key] in roles:
@@ -249,6 +251,9 @@ def spa_roles_of(user: str | None = None) -> list[str]:
 	if found:
 		# Keep SPA_ROLES priority order.
 		return [key for key in SPA_ROLES if key in found]
+	# App provider (Administrator / System Manager) is not a company SPA role.
+	if user == "Administrator" or "System Manager" in roles:
+		return []
 	if "Accounts Manager" in roles or "UAE Tax Manager" in roles:
 		return ["accountant"]
 	# ERPNext Desk "Accounts User" (not TaxMate Accounts User) → clerk.
@@ -257,10 +262,10 @@ def spa_roles_of(user: str | None = None) -> list[str]:
 	return ["viewer"]
 
 
-def spa_role_of(user: str | None = None) -> str:
-	"""Highest SPA role for UI gates. System Manager is always Owner (Admin in the SPA)."""
+def spa_role_of(user: str | None = None) -> str | None:
+	"""Highest SPA client role, or None for app providers with no TaxMate markers."""
 	roles = spa_roles_of(user)
-	return roles[0] if roles else "viewer"
+	return roles[0] if roles else None
 
 
 def require_spa_role(*allowed: str) -> None:

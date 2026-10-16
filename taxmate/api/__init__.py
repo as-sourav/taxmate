@@ -10,6 +10,7 @@ from taxmate.api.resource import require_login
 from taxmate.search import ALLOWED_SEARCH_DOCTYPES, DENIED_SEARCH_DOCTYPES, GLOBAL_SEARCH_DOCTYPES
 from taxmate.setup.financial_reports import CORE_REPORT_LINKS, TAXMATE_REPORT_LINKS
 from taxmate.setup.home import DAILY_SHORTCUTS, HOME_LINKS, UAE_SHORTCUTS
+from taxmate.setup.company_owner import is_app_provider
 from taxmate.setup.spa_roles import addon_roles_of, spa_role_of, spa_roles_of
 from taxmate.utils.company import get_default_company
 
@@ -113,10 +114,6 @@ _EXISTING_ACTIONS: tuple[dict[str, str], ...] = (
 	{
 		"name": "draft_purchase_invoice_from_incoming",
 		"method": "taxmate.uae_e_invoicing.doctype.uae_incoming_invoice.uae_incoming_invoice.create_purchase_invoice",
-	},
-	{
-		"name": "lookup_peppol_participant",
-		"method": "taxmate.uae_e_invoicing.utils.participant.lookup_peppol_participant",
 	},
 	{
 		"name": "get_or_create_vat_201",
@@ -294,6 +291,7 @@ def get_catalog() -> dict[str, Any]:
 			{"name": "list_users", "method": "taxmate.api.users.list_users"},
 			{"name": "get_user", "method": "taxmate.api.users.get_user"},
 			{"name": "invite_user", "method": "taxmate.api.users.invite_user"},
+			{"name": "onboard_company_owner", "method": "taxmate.api.users.onboard_company_owner"},
 			{"name": "update_user", "method": "taxmate.api.users.update_user"},
 			{"name": "set_user_role", "method": "taxmate.api.users.set_user_role"},
 			{"name": "set_user_enabled", "method": "taxmate.api.users.set_user_enabled"},
@@ -334,6 +332,7 @@ def get_session() -> dict[str, Any]:
 			None,
 		)
 
+	provider = is_app_provider()
 	return {
 		"user": frappe.session.user,
 		"full_name": frappe.utils.get_fullname(frappe.session.user),
@@ -344,6 +343,7 @@ def get_session() -> dict[str, Any]:
 		"spa_role": spa_role_of(),
 		"spa_roles": spa_roles_of(),
 		"extra_roles": addon_roles_of(),
+		"is_app_provider": provider,
 		# The SITE's today, not the browser's. Anything date-driven in the UI
 		# -- most of all whether an invoice is overdue -- has to agree with the
 		# server, and a viewer outside Asia/Dubai is a day off for part of it.

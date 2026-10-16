@@ -11,8 +11,9 @@ export type Session = {
   currency?: string | null;
   country?: string | null;
   roles?: string[];
-  spa_role?: "owner" | "accountant" | "clerk" | "viewer";
+  spa_role?: "owner" | "accountant" | "clerk" | "viewer" | null;
   spa_roles?: Array<"owner" | "accountant" | "clerk" | "viewer">;
+  is_app_provider?: boolean;
   extra_roles?: string[];
   /** The SITE's date, so anything date-driven agrees with the server. */
   today?: string;
