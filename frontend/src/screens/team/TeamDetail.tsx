@@ -36,10 +36,11 @@ export default function TeamDetail() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
+  const company = session.company || "";
   const get = useFrappeGetCall<{ message: TeamUser }>(
     METHOD.getUser,
     { user: userName },
-    allowed && userName ? `team-user-${userName}` : null,
+    allowed && userName && company ? `team-user-${company}-${userName}` : null,
     { revalidateOnFocus: false },
   );
   const canEdit = owner && !self && get.data?.message?.can_manage !== false;

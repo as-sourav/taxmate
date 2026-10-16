@@ -2,6 +2,7 @@
  * Team list — compact rows like a Frappe List View.
  * Role editing lives on TeamDetail tabs (Details / Roles / Access).
  * Catalog: list_users. User is not a resource doctype.
+ * Roster is scoped to the session active company.
  */
 import { useFrappeGetCall } from "frappe-react-sdk";
 import { useNavigate } from "react-router-dom";
@@ -30,6 +31,8 @@ export type TeamUser = {
   creation?: string | null;
   /** False when this person also works for a company the caller does not own. */
   can_manage?: boolean;
+  /** Active company the roster was loaded for. */
+  company?: string | null;
 };
 
 function roleLabels(u: TeamUser): string[] {
@@ -42,10 +45,11 @@ export default function TeamList() {
   const session = useSession();
   const owner = canManageUsers(session);
   const allowed = canViewTeam(session);
+  const company = session.company || "";
   const list = useFrappeGetCall<{ message: TeamUser[] }>(
     METHOD.listUsers,
     undefined,
-    allowed ? "team-users" : null,
+    allowed && company ? `team-users-${company}` : null,
     { revalidateOnFocus: false },
   );
   const rows = allowed ? (list.data?.message ?? []) : [];
@@ -91,8 +95,14 @@ export default function TeamList() {
         }
       />
       {!allowed && <ErrorBox error={{ message: t("team.denied") }} />}
+      {allowed && !company && <ErrorBox error={{ message: t("team.needCompany") }} />}
+      {allowed && company ? (
+        <p className="muted" style={{ margin: "0 0 12px" }}>
+          {t("team.companyScope").replace("{company}", company)}
+        </p>
+      ) : null}
       {list.error && <ErrorBox error={list.error} onRetry={() => list.mutate()} />}
-      {allowed && (
+      {allowed && company && (
         <Card bodyClass={null as unknown as string}>
           <DataTable<TeamUser>
             rows={rows}

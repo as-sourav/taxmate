@@ -1,6 +1,7 @@
 /**
  * Invite a teammate. Catalog invite_user — User is not a resource doctype.
  * Roles are multi-select; Frappe unions DocPerms across Has Role rows.
+ * Invite always binds the new user to the session active company.
  */
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -17,6 +18,7 @@ export default function TeamInvite() {
   const nav = useNavigate();
   const session = useSession();
   const owner = canManageUsers(session);
+  const company = session.company || "";
   const invite = useFrappePostCall<{ message: { name: string } }>(METHOD.inviteUser);
   const flags = useFrappeGetCall<{ message: { addon_roles?: string[] } }>(
     METHOD.getFeatureFlags,
@@ -35,7 +37,7 @@ export default function TeamInvite() {
 
   if (!session.user) return <Loading />;
 
-  const ready = owner && firstName.trim() && email.trim() && roles.length > 0;
+  const ready = owner && !!company && firstName.trim() && email.trim() && roles.length > 0;
 
   function toggleSpa(role: SpaRole) {
     setRoles((prev) => {
@@ -69,6 +71,10 @@ export default function TeamInvite() {
     }
   }
 
+  const title = company
+    ? t("team.inviteFor").replace("{company}", company)
+    : t("team.invite");
+
   return (
     <>
       <PageHead
@@ -77,7 +83,7 @@ export default function TeamInvite() {
             {t("nav.team")}
           </button>
         }
-        title={t("team.invite")}
+        title={title}
         actions={
           <>
             <button type="button" className="btn ghost" onClick={() => nav("/team")}>{t("soc.discard")}</button>
@@ -93,10 +99,16 @@ export default function TeamInvite() {
         }
       />
       {!owner && <ErrorBox error={{ message: t("team.denied") }} />}
+      {owner && !company && <ErrorBox error={{ message: t("team.needCompany") }} />}
       {invite.error && <ErrorBox error={invite.error} />}
       <FormLayout>
         <Card>
           <form className="stack" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+            {company ? (
+              <p className="muted" style={{ margin: 0 }}>
+                {t("team.companyScope").replace("{company}", company)}
+              </p>
+            ) : null}
             <div className="grid2">
               <Field label={t("team.firstName")} required htmlFor="team-first-name">
                 <input id="team-first-name" name="first_name" className="ctl" value={firstName}
