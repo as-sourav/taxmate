@@ -5,8 +5,8 @@ from __future__ import annotations
 import frappe
 from frappe.utils import add_to_date, now_datetime
 
-# Leave recent submissions to webhooks; only poll ones that look stuck
-STALE_AFTER_MINUTES = 30
+# Complyance does not webhook sales documents. Poll after a short wait.
+STALE_AFTER_MINUTES = 5
 BATCH_SIZE = 50
 
 

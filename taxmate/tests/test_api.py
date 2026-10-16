@@ -1813,10 +1813,17 @@ class TestUaeTaxSettingsApi(FrappeTestCase):
 		self.assertIn("has_client_secret", before)
 		old_sla = before.get("sla_days") or 14
 		new_sla = 13 if int(old_sla) == 14 else 14
-		saved = save_uae_tax_settings({"sla_days": new_sla, "asp_provider": before.get("asp_provider") or "Sandbox"})
+		source = before.get("participant_id") or "taxmate:1.0"
+		if ":" not in str(source):
+			source = "taxmate:1.0"
+		saved = save_uae_tax_settings(
+			{"sla_days": new_sla, "participant_id": source, "asp_provider": "Complyance"}
+		)
 		self.assertEqual(int(saved.get("sla_days")), new_sla)
-		# restore
-		save_uae_tax_settings({"sla_days": old_sla, "asp_provider": before.get("asp_provider") or "Sandbox"})
+		self.assertEqual(saved.get("asp_provider"), "Complyance")
+		save_uae_tax_settings(
+			{"sla_days": old_sla, "participant_id": source, "asp_provider": "Complyance"}
+		)
 
 	def test_save_preserves_existing_secrets(self):
 		from frappe.utils.password import get_decrypted_password, set_encrypted_password
@@ -1831,10 +1838,14 @@ class TestUaeTaxSettingsApi(FrappeTestCase):
 		self.assertTrue(before.get("has_auth_key"))
 		old_sla = before.get("sla_days") or 14
 		new_sla = 13 if int(old_sla) == 14 else 14
+		source = before.get("participant_id") or "taxmate:1.0"
+		if ":" not in str(source):
+			source = "taxmate:1.0"
 		save_uae_tax_settings(
 			{
 				"sla_days": new_sla,
-				"asp_provider": before.get("asp_provider") or "Sandbox",
+				"participant_id": source,
+				"asp_provider": "Complyance",
 				"archive_retention_years": before.get("archive_retention_years") or 5,
 			}
 		)
@@ -1847,7 +1858,8 @@ class TestUaeTaxSettingsApi(FrappeTestCase):
 		save_uae_tax_settings(
 			{
 				"sla_days": old_sla,
-				"asp_provider": before.get("asp_provider") or "Sandbox",
+				"participant_id": source,
+				"asp_provider": "Complyance",
 				"archive_retention_years": before.get("archive_retention_years") or 5,
 			}
 		)

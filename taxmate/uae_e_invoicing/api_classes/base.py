@@ -215,7 +215,7 @@ class BaseAPI:
 
 	def _mask(self, headers: dict) -> dict:
 		masked = dict(headers)
-		for key in ("Authorization", "X-Flick-Auth-Key"):
+		for key in ("Authorization",):
 			if key in masked:
 				masked[key] = "*****"
 		return masked

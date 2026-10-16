@@ -16,3 +16,4 @@ taxmate.patches.v0_1.drop_bdr_sales_invoice_unique
 taxmate.patches.v0_1.apply_phase7_multi_entity
 taxmate.patches.v0_1.apply_phase8_statutory
 taxmate.patches.v0_1.backfill_company_user_permissions
+taxmate.patches.v0_1.set_complyance_asp_provider

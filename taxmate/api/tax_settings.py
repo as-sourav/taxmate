@@ -1,9 +1,8 @@
 """UAE Tax Settings (ASP / e-invoicing) for the SPA.
 
-Importers/callers: frontend TaxSettings via get_catalog().
-Affected API: get_uae_tax_settings, save_uae_tax_settings.
-Data schemas: UAE Tax Settings (Single); password fields never returned.
-User instruction: Fix Tax Settings page — robust, production-ready, from findings.
+Callers: frontend TaxSettings via get_catalog().
+Methods: get_uae_tax_settings, save_uae_tax_settings.
+Password fields never leave the server.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from taxmate.api.resource import require_login
 from taxmate.setup.spa_roles import require_spa_role
 
 _DT = "UAE Tax Settings"
-_PROVIDERS = frozenset({"Sandbox", "Flick"})
+_PROVIDER = "Complyance"
 
 # Non-secret fields the SPA may read and write.
 _PUBLIC_FIELDS = (
@@ -94,9 +93,15 @@ def save_uae_tax_settings(doc: dict | str | None = None) -> dict[str, Any]:
 
 	settings = frappe.get_single(_DT)
 
-	provider = cstr(doc.get("asp_provider", settings.asp_provider) or "Sandbox").strip()
-	if provider not in _PROVIDERS:
-		frappe.throw(_("ASP Provider must be Sandbox or Flick"))
+	from taxmate.uae_e_invoicing.api_classes.complyance import (
+		ComplyanceSourceError,
+		parse_complyance_source,
+	)
+
+	try:
+		parse_complyance_source(cstr(doc.get("participant_id", settings.participant_id)))
+	except ComplyanceSourceError:
+		frappe.throw(_("Complyance source must be name:version, for example taxmate:1.0."))
 
 	sla = cint(doc.get("sla_days", settings.sla_days))
 	if sla < 1:
@@ -113,7 +118,7 @@ def save_uae_tax_settings(doc: dict | str | None = None) -> dict[str, Any]:
 		if not settings.meta.has_field(field):
 			continue
 		if field == "asp_provider":
-			settings.asp_provider = provider
+			settings.asp_provider = _PROVIDER
 		elif field == "sla_days":
 			settings.sla_days = sla
 		elif field == "archive_retention_years":

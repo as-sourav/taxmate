@@ -73,10 +73,9 @@ class TestBox1Filter(unittest.TestCase):
 class TestAspContract(unittest.TestCase):
 	def test_providers_override_base_contract(self):
 		from taxmate.uae_e_invoicing.api_classes.base import BaseAPI
-		from taxmate.uae_e_invoicing.api_classes.flick import FlickAPI
-		from taxmate.uae_e_invoicing.api_classes.sandbox import SandboxAPI
+		from taxmate.uae_e_invoicing.api_classes.complyance import ComplyanceAPI
 
-		for cls in (FlickAPI, SandboxAPI):
+		for cls in (ComplyanceAPI,):
 			for method in ("submit_invoice", "get_document_status", "get_document_xml", "get_document_pdf"):
 				self.assertIsNot(getattr(cls, method), getattr(BaseAPI, method))
 

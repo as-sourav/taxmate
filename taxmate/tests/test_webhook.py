@@ -13,7 +13,7 @@ class TestWebhookSignature(unittest.TestCase):
 	def test_unsigned_without_secret_is_rejected(self):
 		from taxmate.uae_e_invoicing.utils.webhook import _verify_signature
 
-		settings = frappe._dict(webhook_secret=None, asp_provider="Sandbox", sandbox_mode=1)
+		settings = frappe._dict(webhook_secret=None, asp_provider="Complyance", sandbox_mode=1)
 		with patch("frappe.get_cached_doc", return_value=settings):
 			self.assertFalse(_verify_signature(b"{}"))
 
