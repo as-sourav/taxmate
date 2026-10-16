@@ -3,6 +3,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 
 import { t } from "../i18n/strings";
 import { useLang } from "../lib/i18n";
+import { persistLang } from "../lib/uiPrefs";
 import TaxMateMark from "./TaxMateMark";
 import type { BioKind } from "./biometric";
 import { PIN_LENGTH } from "./pin";
@@ -23,7 +24,11 @@ export function LangToggle() {
       className="langbtn mob-lang"
       aria-label={t("mob.lang.label")}
       lang={lang === "ar" ? "en" : "ar"}
-      onClick={() => set(lang === "ar" ? "en" : "ar")}
+      onClick={() => {
+        const next = lang === "ar" ? "en" : "ar";
+        set(next);
+        void persistLang(next);
+      }}
     >
       {t("mob.lang.toggle")}
     </button>

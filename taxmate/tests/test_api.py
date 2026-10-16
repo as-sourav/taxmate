@@ -119,7 +119,42 @@ class TestApiCatalog(FrappeTestCase):
 		self.assertIn("company", session)
 		self.assertIn("roles", session)
 		self.assertTrue(session["roles"])
-		self.assertIn(session.get("spa_role"), ("owner", "accountant", "clerk", "viewer"))
+		# Administrator is app provider and has no TaxMate SPA role.
+		if session.get("is_app_provider"):
+			self.assertIn(session.get("spa_role"), (None, "owner", "accountant", "clerk", "viewer"))
+		else:
+			self.assertIn(session.get("spa_role"), ("owner", "accountant", "clerk", "viewer"))
+		self.assertIn("language", session)
+		self.assertIn("desk_theme", session)
+		self.assertIn("lang", session)
+		self.assertIn("theme", session)
+
+	def test_update_ui_preferences_maps_to_user(self):
+		from taxmate.api.ui_prefs import update_ui_preferences
+
+		user = frappe.session.user
+		before = frappe.db.get_value("User", user, ["language", "desk_theme"], as_dict=True)
+		try:
+			out = update_ui_preferences(language="ar", theme="dark")
+			self.assertEqual(out.get("lang"), "ar")
+			self.assertEqual(out.get("theme"), "dark")
+			self.assertEqual(frappe.db.get_value("User", user, "language"), "ar")
+			self.assertEqual(frappe.db.get_value("User", user, "desk_theme"), "Dark")
+
+			out = update_ui_preferences(language="en", theme="system")
+			self.assertEqual(out.get("lang"), "en")
+			self.assertEqual(out.get("theme"), "system")
+			self.assertEqual(frappe.db.get_value("User", user, "desk_theme"), "Automatic")
+		finally:
+			frappe.db.set_value(
+				"User",
+				user,
+				{
+					"language": before.language,
+					"desk_theme": before.desk_theme,
+				},
+				update_modified=False,
+			)
 
 
 class TestApiResource(FrappeTestCase):
