@@ -215,6 +215,7 @@ export const METHOD = {
   getProfile: "taxmate.api.users.get_profile",
   updateProfile: "taxmate.api.users.update_profile",
   changePassword: "taxmate.api.users.change_password",
+  updateUiPreferences: "taxmate.api.ui_prefs.update_ui_preferences",
   getUnclearedTransactions: "taxmate.api.bank_reconciliation.get_uncleared_transactions",
   markCleared: "taxmate.api.bank_reconciliation.mark_cleared",
   makeSupplierQuotationPO: "taxmate.api.supplier_quotation.make_purchase_order",

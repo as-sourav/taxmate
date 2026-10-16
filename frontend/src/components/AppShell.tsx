@@ -3,7 +3,8 @@ import { NavLink, useLocation } from "react-router-dom";
 import { useFrappeGetCall } from "frappe-react-sdk";
 
 import { useLang } from "../lib/i18n";
-import { appearance, toggleTheme } from "../lib/theme";
+import { appearance } from "../lib/theme";
+import { persistLang, persistThemeToggle } from "../lib/uiPrefs";
 import { useSession } from "../lib/session";
 import { canOpenPosNext, canViewTeam } from "../lib/roles";
 import { buildNav, groupedNav, groupForPath, FeatureFlags } from "../lib/nav";
@@ -47,7 +48,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const mq = matchMedia("(prefers-color-scheme: dark)");
     const sync = () => setMode(appearance());
     mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
+    window.addEventListener("taxmate-theme", sync);
+    return () => {
+      mq.removeEventListener("change", sync);
+      window.removeEventListener("taxmate-theme", sync);
+    };
   }, []);
   /**
    * Below 900px the rail is replaced by MobileNav's bottom tab bar. Decided in
@@ -190,7 +195,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 type="button"
                 className="langbtn"
                 lang={lang === "en" ? "ar" : "en"}
-                onClick={() => setLocale(lang === "en" ? "ar" : "en")}
+                onClick={() => {
+                  const next = lang === "en" ? "ar" : "en";
+                  setLocale(next);
+                  void persistLang(next);
+                }}
               >
                 {lang === "en" ? "عربي" : "English"}
               </button>
@@ -198,8 +207,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 type="button"
                 className="iconbtn bordered"
                 onClick={() => {
-                  toggleTheme();
-                  setMode(appearance());
+                  void persistThemeToggle().then(() => setMode(appearance()));
                 }}
                 aria-label={mode === "dark" ? t("a11y.themeLight") : t("a11y.themeDark")}
               >

@@ -299,6 +299,7 @@ def get_catalog() -> dict[str, Any]:
 			{"name": "get_profile", "method": "taxmate.api.users.get_profile"},
 			{"name": "update_profile", "method": "taxmate.api.users.update_profile"},
 			{"name": "change_password", "method": "taxmate.api.users.change_password"},
+			{"name": "update_ui_preferences", "method": "taxmate.api.ui_prefs.update_ui_preferences"},
 			{"name": "get_session", "method": "taxmate.api.get_session"},
 			{"name": "get_catalog", "method": "taxmate.api.get_catalog"},
 			{"name": "owner_dashboard", "method": "taxmate.api.owner_dashboard.get_owner_dashboard"},
@@ -333,6 +334,9 @@ def get_session() -> dict[str, Any]:
 		)
 
 	provider = is_app_provider()
+	from taxmate.api.ui_prefs import read_ui_prefs
+
+	prefs = read_ui_prefs()
 	return {
 		"user": frappe.session.user,
 		"full_name": frappe.utils.get_fullname(frappe.session.user),
@@ -349,4 +353,9 @@ def get_session() -> dict[str, Any]:
 		# server, and a viewer outside Asia/Dubai is a day off for part of it.
 		"today": frappe.utils.today(),
 		"time_zone": frappe.utils.get_system_timezone(),
+		# User.language + User.desk_theme (SPA lang/theme aliases).
+		"language": prefs.get("language"),
+		"desk_theme": prefs.get("desk_theme"),
+		"lang": prefs.get("lang"),
+		"theme": prefs.get("theme"),
 	}
