@@ -133,14 +133,14 @@ export default function PickListForm() {
           {lines.map((ln, i) => (
             <div key={i} className="flex gap-2 mb-2 items-end">
               <Field label={i === 0 ? t("picklist.col.item") : ""}>
-                <LinkField doctype={DT.item} value={ln.item_code} onChange={(v) => setLine(i, "item_code", v)} placeholder="Item" />
+                <LinkField doctype={DT.item} value={ln.item_code} onChange={(v) => setLine(i, "item_code", v)} placeholder={t("pick.ph.item")} />
               </Field>
               <Field label={i === 0 ? t("picklist.col.qty") : ""}>
                 <input className="inp" type="number" min={0.001} step={0.001} value={ln.qty}
                   onChange={(e) => setLine(i, "qty", parseNum(e.target.value))} />
               </Field>
               <Field label={i === 0 ? t("picklist.col.warehouse") : ""}>
-                <LinkField doctype={DT.warehouse} value={ln.warehouse} onChange={(v) => setLine(i, "warehouse", v)} placeholder="Warehouse" />
+                <LinkField doctype={DT.warehouse} value={ln.warehouse} onChange={(v) => setLine(i, "warehouse", v)} placeholder={t("pick.ph.warehouse")} />
               </Field>
               <button type="button" className="btn btn-ghost text-red-500" onClick={() => removeLine(i)} aria-label={t("common.remove")}>✕</button>
             </div>

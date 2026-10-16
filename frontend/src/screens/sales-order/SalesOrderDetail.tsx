@@ -65,7 +65,7 @@ export default function SalesOrderDetail() {
       const doctype = kind === "dn" ? DT.deliveryNote : DT.salesInvoice;
       const res = await call({ source_name: name });
       const mapped = res?.message;
-      if (!mapped) throw new Error("The mapper returned nothing.");
+      if (!mapped) throw new Error(t("doc.err.mapFailed"));
       /* The mapped doc carries a placeholder name and local-only flags — drop
          them so the insert autonames instead of colliding.                 */
       const body: Record<string, unknown> = { ...(mapped as Record<string, unknown>) };
@@ -166,7 +166,7 @@ export default function SalesOrderDetail() {
         <p className="sub" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginTop: 7 }}>
           <Pill cls={SO_PILL_CLASS[ui]}>{t(`status.${ui}`)}</Pill>
           {late && <Pill cls="p-overdue">{t("so.late")}</Pill>}
-          {data.po_no && <span className="pill p-flat">PO · {data.po_no}</span>}
+          {data.po_no && <span className="pill p-flat">{t("txn.poLabel")} · {data.po_no}</span>}
         </p>
       </PageHead>
 

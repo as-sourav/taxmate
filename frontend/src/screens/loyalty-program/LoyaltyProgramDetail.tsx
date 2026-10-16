@@ -59,7 +59,7 @@ export default function LoyaltyProgramDetail() {
         <ReadRow k={t("lp.col.to")} v={date(data.to_date)} />
         <ReadRow k={t("lp.col.convFactor")} v={String(data.conversion_factor ?? 1)} />
         {(data.expiry_duration ?? 0) > 0 && (
-          <ReadRow k={t("lp.col.expiry")} v={`${data.expiry_duration} days`} />
+          <ReadRow k={t("lp.col.expiry")} v={t("lp.expiryDays").replace("{n}", String(data.expiry_duration))} />
         )}
       </Card>
     </>

@@ -328,7 +328,7 @@ export default function ItemForm() {
         if (!priceResolved || !priceList) {
           /* Guarded by the disabled Save button; this is the belt-and-braces
              so a race can never create a second Item Price.              */
-          throw new Error("Still loading the price list — try again in a moment.");
+          throw new Error(t("item.err.priceListLoading"));
         }
         if (priceRow) {
           if (Number(priceRow.price_list_rate) !== Number(form.standard_rate)) {
@@ -425,7 +425,7 @@ export default function ItemForm() {
             />
           </Field>
           <Field label={t("item.barcode")}>
-            <input className="ctl" value={form.barcode} onChange={(e) => set("barcode", e.target.value)} placeholder="e.g. 6290001234567" />
+            <input className="ctl" value={form.barcode} onChange={(e) => set("barcode", e.target.value)} placeholder={t("item.ph.barcode")} />
           </Field>
           <Field label={t("item.col.stock")}>
             <select className="ctl" value={String(form.is_stock_item)} onChange={(e) => set("is_stock_item", Number(e.target.value))}>
@@ -614,7 +614,7 @@ export default function ItemForm() {
               <Field label={t("item.serialNoSeries")}>
                 <input className="ctl" value={form.serial_no_series}
                   onChange={(e) => set("serial_no_series", e.target.value)}
-                  placeholder="e.g. SN-.####" />
+                  placeholder={t("item.ph.serialSeries")} />
               </Field>
             )}
             <Field label={t("item.hasBatchNo")}>
@@ -640,7 +640,7 @@ export default function ItemForm() {
                 <Field label={t("item.batchNumberSeries")}>
                   <input className="ctl" value={form.batch_number_series}
                     onChange={(e) => set("batch_number_series", e.target.value)}
-                    placeholder="e.g. BN-.####" />
+                    placeholder={t("item.ph.batchSeries")} />
                 </Field>
               </>
             )}
@@ -650,10 +650,8 @@ export default function ItemForm() {
       <Card title={t("item.uomConversions")}>
         <p style={{ color: "var(--faint)", fontSize: 12, marginBottom: 8 }}>
           {t("item.uom.factorHint")
-            .replace("{uom}", "case")
-            .replace("{stockUom}", form.stock_uom || "stock UOM")}
-          {" — "}
-          1 case = X {form.stock_uom || "nos"}
+            .replace("{uom}", t("item.uom.exampleUom"))
+            .replace("{stockUom}", form.stock_uom || t("item.uom.stockUomWord"))}
         </p>
         {uomRows.length === 0 ? (
           <p style={{ color: "var(--faint)", marginBottom: 8 }}>{t("item.uomConversions")}: —</p>

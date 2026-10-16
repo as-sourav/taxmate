@@ -125,16 +125,16 @@ export default function AssetForm() {
             <input className="inp" value={assetName} onChange={(e) => setAssetName(e.target.value)} placeholder={t("ast.namePh")} />
           </Field>
           <Field label={t("ast.col.item")}>
-            <LinkField doctype={DT.item} value={itemCode} onChange={setItemCode} placeholder="Item (optional)" />
+            <LinkField doctype={DT.item} value={itemCode} onChange={setItemCode} placeholder={t("asset.ph.item")} />
           </Field>
           <Field label={t("ast.col.category")}>
-            <LinkField doctype={DT.assetCategory} value={assetCategory} onChange={setAssetCategory} placeholder="Asset Category" />
+            <LinkField doctype={DT.assetCategory} value={assetCategory} onChange={setAssetCategory} placeholder={t("asset.ph.category")} />
           </Field>
           <Field label={t("ast.location")} required>
             <LinkField doctype="Location" value={location} onChange={setLocation} />
           </Field>
           <Field label={t("ast.col.company")}>
-            <LinkField doctype="Company" value={company} onChange={setCompany} placeholder="Company" />
+            <LinkField doctype="Company" value={company} onChange={setCompany} placeholder={t("asset.ph.company")} />
           </Field>
           <Field label={t("ast.col.purchaseDate")}>
             <input className="inp" type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
@@ -156,10 +156,10 @@ export default function AssetForm() {
             <>
               <Field label={t("ast.method")}>
                 <select className="inp" value={method} onChange={(e) => setMethod(e.target.value)}>
-                  <option value="Straight Line">Straight Line</option>
-                  <option value="Double Declining Balance">Double Declining Balance</option>
-                  <option value="Written Down Value">Written Down Value</option>
-                  <option value="Manual">Manual</option>
+                  <option value="Straight Line">{t("asset.dep.straightLine")}</option>
+                  <option value="Double Declining Balance">{t("asset.dep.doubleDeclining")}</option>
+                  <option value="Written Down Value">{t("asset.dep.wdv")}</option>
+                  <option value="Manual">{t("asset.dep.manual")}</option>
                 </select>
               </Field>
               <Field label={t("ast.life")}>

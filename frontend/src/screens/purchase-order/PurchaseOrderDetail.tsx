@@ -66,7 +66,7 @@ export default function PurchaseOrderDetail() {
       const doctype = kind === "pr" ? DT.purchaseReceipt : DT.purchaseInvoice;
       const res = await call({ source_name: name });
       const mapped = res?.message;
-      if (!mapped) throw new Error("The mapper returned nothing.");
+      if (!mapped) throw new Error(t("doc.err.mapFailed"));
       const body: Record<string, unknown> = { ...(mapped as Record<string, unknown>) };
       delete body.name;
       delete body.doctype;

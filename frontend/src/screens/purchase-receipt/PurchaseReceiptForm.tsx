@@ -352,7 +352,7 @@ export default function PurchaseReceiptForm() {
               {
                 key: "batch", label: t("pr.batchNo"), td: { minWidth: 100 },
                 render: (l, i) => (
-                  <input className="ctl mini" placeholder="Batch" value={l.batch_no ?? ""}
+                  <input className="ctl mini" placeholder={t("txn.ph.batch")} value={l.batch_no ?? ""}
                     onChange={(e) => setLines((ls) => ls.map((x, j) => j === i ? { ...x, batch_no: e.target.value } : x))} />
                 ),
               },

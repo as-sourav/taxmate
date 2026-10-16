@@ -192,7 +192,7 @@ export default function PaymentForm() {
     async (sourceDoctype: string, voucherNo: string, current: PayDoc): Promise<PayDoc> => {
       const r = await mapper.call({ dt: sourceDoctype, dn: voucherNo });
       const m = r?.message;
-      if (!m) throw new Error("Could not read the accounts for this invoice.");
+      if (!m) throw new Error(t("pay.err.invoiceAccounts"));
       return {
         ...m,
         posting_date: current.posting_date || m.posting_date || toIsoDate(new Date()),

@@ -212,7 +212,7 @@ export default function InvoiceDetail() {
           <span className={`echip ${eStatus ? EINVOICE_CHIP[eStatus] ?? "e-none" : "e-none"}`}>
             {eStatus || t("inv.eNone")}
           </span>
-          {data.po_no && <span className="pill p-flat">PO · {data.po_no}</span>}
+          {data.po_no && <span className="pill p-flat">{t("txn.poLabel")} · {data.po_no}</span>}
           {data.return_against && (
             <button type="button" className="pill p-flat"
                onClick={() => nav(`/invoices/${encodeURIComponent(data.return_against!)}`)}>
