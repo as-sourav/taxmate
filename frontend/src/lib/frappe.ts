@@ -207,6 +207,7 @@ export const METHOD = {
   listUsers: "taxmate.api.users.list_users",
   getUser: "taxmate.api.users.get_user",
   inviteUser: "taxmate.api.users.invite_user",
+  onboardCompanyOwner: "taxmate.api.users.onboard_company_owner",
   updateUser: "taxmate.api.users.update_user",
   setUserRole: "taxmate.api.users.set_user_role",
   setUserEnabled: "taxmate.api.users.set_user_enabled",

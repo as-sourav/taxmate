@@ -11,7 +11,7 @@ import { DataTable, type Column } from "../../components/DataTable";
 import { Card, ErrorBox, Loading, PageHead, Pill } from "../../components/ui";
 import { t } from "../../i18n/strings";
 import { METHOD } from "../../lib/frappe";
-import { canManageUsers, canViewTeam, type SpaRole } from "../../lib/roles";
+import { canManageUsers, canOnboardCompanyOwner, canViewTeam, type SpaRole } from "../../lib/roles";
 import { useSession } from "../../lib/session";
 
 export type TeamUser = {
@@ -44,6 +44,7 @@ export default function TeamList() {
   const nav = useNavigate();
   const session = useSession();
   const owner = canManageUsers(session);
+  const provider = canOnboardCompanyOwner(session);
   const allowed = canViewTeam(session);
   const company = session.company || "";
   const list = useFrappeGetCall<{ message: TeamUser[] }>(
@@ -91,10 +92,19 @@ export default function TeamList() {
             <button type="button" className="btn" onClick={() => nav("/team/new")}>
               {t("team.invite")}
             </button>
+          ) : provider ? (
+            <button type="button" className="btn" onClick={() => nav("/team/onboard-owner")}>
+              {t("team.onboardOwner")}
+            </button>
           ) : null
         }
       />
-      {!allowed && <ErrorBox error={{ message: t("team.denied") }} />}
+      {provider && (
+        <p className="muted" style={{ margin: "0 0 12px" }}>
+          {t("team.onboardOwnerHint")}
+        </p>
+      )}
+      {!allowed && !provider && <ErrorBox error={{ message: t("team.denied") }} />}
       {allowed && !company && <ErrorBox error={{ message: t("team.needCompany") }} />}
       {allowed && company ? (
         <p className="muted" style={{ margin: "0 0 12px" }}>

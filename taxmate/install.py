@@ -30,12 +30,14 @@ def after_install():
 	_ensure_product_branding()
 	from taxmate.search import configure_global_search
 	from taxmate.setup.desk_app import ensure_taxmate_desktop_icon
+	from taxmate.setup.company_owner import ensure_company_owner_field
 	from taxmate.setup.spa_roles import ensure_spa_roles
 	from taxmate.setup.workspaces import ensure_product_workspaces
 
 	configure_global_search()
 	ensure_product_workspaces()
 	ensure_spa_roles()
+	ensure_company_owner_field()
 	ensure_taxmate_desktop_icon()
 
 

@@ -97,6 +97,7 @@ import LateFilingList from "./screens/late-filing/LateFilingList";
 import LateFilingDetail from "./screens/late-filing/LateFilingDetail";
 import TeamList from "./screens/team/TeamList";
 import TeamInvite from "./screens/team/TeamInvite";
+import OnboardOwner from "./screens/team/OnboardOwner";
 import TeamDetail from "./screens/team/TeamDetail";
 import Profile from "./screens/team/Profile";
 import BankAccountList from "./screens/bank-account/BankAccountList";
@@ -303,6 +304,7 @@ export default function App() {
           <Route path="/tax-settings" element={<TaxSettings />} />
           <Route path="/team" element={<TeamList />} />
           <Route path="/team/new" element={<TeamInvite />} />
+          <Route path="/team/onboard-owner" element={<OnboardOwner />} />
           <Route path="/team/:name" element={<TeamDetail />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/sales" element={<SalesHub />} />

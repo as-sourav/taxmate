@@ -17,11 +17,13 @@ export type PosAddonRole = (typeof POS_ADDON_ROLES)[number];
  * `TaxMate Owner`.
  */
 export function isAppProvider(session: {
-  spa_role?: string;
+  spa_role?: string | null;
   spa_roles?: string[];
   roles?: string[];
   user?: string;
+  is_app_provider?: boolean;
 } | undefined): boolean {
+  if (session?.is_app_provider) return true;
   if (session?.user === "Administrator") return true;
   const roles = session?.roles ?? [];
   const hasTaxMateRole = roles.some((r) =>
@@ -40,7 +42,7 @@ export function isAppProvider(session: {
 }
 
 export function spaRolesOf(session: {
-  spa_role?: string;
+  spa_role?: string | null;
   spa_roles?: string[];
   roles?: string[];
 } | undefined): SpaRole[] {
@@ -48,10 +50,11 @@ export function spaRolesOf(session: {
     (r): r is SpaRole => r === "owner" || r === "accountant" || r === "clerk" || r === "viewer",
   );
   if (listed && listed.length) return listed;
+  if (isAppProvider(session)) return [];
 
   const roles = session?.roles ?? [];
   const found: SpaRole[] = [];
-  if (roles.includes("TaxMate Owner") || roles.includes("System Manager")) found.push("owner");
+  if (roles.includes("TaxMate Owner")) found.push("owner");
   if (roles.includes("TaxMate Accountant")) found.push("accountant");
   if (roles.includes("TaxMate Accounts User") || roles.includes("TaxMate Accounts Officer") || roles.includes("TaxMate Clerk")) found.push("clerk");
   if (roles.includes("TaxMate Auditor") || roles.includes("TaxMate Viewer")) found.push("viewer");
@@ -66,7 +69,7 @@ export function spaRolesOf(session: {
 }
 
 export function spaRoleOf(session: {
-  spa_role?: string;
+  spa_role?: string | null;
   spa_roles?: string[];
   roles?: string[];
 } | undefined): SpaRole {
@@ -78,7 +81,7 @@ export type HomeView = "owner" | "accountant" | "clients";
 /** Home screens this person may open. Null until the session has loaded. */
 export function allowedDashModes(session: {
   user?: string;
-  spa_role?: string;
+  spa_role?: string | null;
   spa_roles?: string[];
   roles?: string[];
 } | undefined): HomeView[] | null {
@@ -95,17 +98,37 @@ export function allowedDashModes(session: {
   return ["accountant"];
 }
 
-export function canWrite(session: { spa_role?: string; spa_roles?: string[]; roles?: string[] } | undefined): boolean {
+export function canWrite(session: { spa_role?: string | null; spa_roles?: string[]; roles?: string[] } | undefined): boolean {
   return spaRoleOf(session) !== "viewer";
 }
 
-export function canManageUsers(session: { spa_role?: string; spa_roles?: string[]; roles?: string[] } | undefined): boolean {
+export function canManageUsers(session: {
+  spa_role?: string | null;
+  spa_roles?: string[];
+  roles?: string[];
+  is_app_provider?: boolean;
+  user?: string;
+} | undefined): boolean {
+  if (isAppProvider(session)) return false;
+  const roles = session?.roles ?? [];
+  if (!roles.includes("TaxMate Owner")) return false;
   return spaRoleOf(session) === "owner";
+}
+
+/** Provider (Administrator) may assign a company TaxMate Owner, never be one. */
+export function canOnboardCompanyOwner(session: {
+  spa_role?: string | null;
+  spa_roles?: string[];
+  roles?: string[];
+  is_app_provider?: boolean;
+  user?: string;
+} | undefined): boolean {
+  return isAppProvider(session);
 }
 
 /** True when the user may edit all curated Company Settings fields (Owner + Provider). */
 export function canManageCompany(session: {
-  spa_role?: string;
+  spa_role?: string | null;
   spa_roles?: string[];
   roles?: string[];
   user?: string;
@@ -119,7 +142,7 @@ export function canManageCompany(session: {
  * Owner and Accountant (DocPerm already grants Company write to both).
  */
 export function canEditCompanyAccounts(session: {
-  spa_role?: string;
+  spa_role?: string | null;
   spa_roles?: string[];
   roles?: string[];
   user?: string;
@@ -130,7 +153,7 @@ export function canEditCompanyAccounts(session: {
 
 /** Site-wide UAE Tax Settings (ASP). Same write roles as settings Singles. */
 export function canEditTaxSettings(session: {
-  spa_role?: string;
+  spa_role?: string | null;
   spa_roles?: string[];
   roles?: string[];
   user?: string;
@@ -147,13 +170,13 @@ export function canOpenDesk(session: { user?: string } | undefined): boolean {
   return session?.user === "Administrator";
 }
 
-export function canViewTeam(session: { spa_role?: string; spa_roles?: string[]; roles?: string[] } | undefined): boolean {
+export function canViewTeam(session: { spa_role?: string | null; spa_roles?: string[]; roles?: string[] } | undefined): boolean {
   const spa = spaRoleOf(session);
   return spa === "owner" || spa === "accountant";
 }
 
 export function canOpenPosNext(session: {
-  spa_role?: string;
+  spa_role?: string | null;
   spa_roles?: string[];
   roles?: string[];
   extra_roles?: string[];

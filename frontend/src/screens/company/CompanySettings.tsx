@@ -13,7 +13,7 @@ import { useFrappeGetCall } from "frappe-react-sdk";
 import { DT, METHOD, readableError } from "../../lib/frappe";
 import { useSave } from "../../lib/resource";
 import { useSession } from "../../lib/session";
-import { canEditCompanyAccounts, canManageCompany } from "../../lib/roles";
+import { canEditCompanyAccounts, canManageCompany, canViewTeam } from "../../lib/roles";
 import { t } from "../../i18n/strings";
 import { ErrorBox, Field, Loading, PageHead } from "../../components/ui";
 import DocHistory from "../../components/DocHistory";
@@ -24,6 +24,7 @@ type CompanyDoc = {
   name: string;
   company_name: string;
   abbr: string;
+  custom_taxmate_owner?: string | null;
   company_logo?: string | null;
   tax_id?: string | null;
   country?: string | null;
@@ -124,6 +125,7 @@ export default function CompanySettings() {
   const session = useSession();
   const canFull = canManageCompany(session);
   const canAccounts = canEditCompanyAccounts(session);
+  const canTeam = canViewTeam(session);
   const company = session.company ?? "";
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -142,7 +144,7 @@ export default function CompanySettings() {
   const team = useFrappeGetCall<{ message: { name: string; full_name?: string; email?: string }[] }>(
     METHOD.listUsers,
     {},
-    canAccounts ? "company-team-users" : null,
+    canTeam ? `company-team-users-${company}` : null,
     { revalidateOnFocus: false },
   );
   const { updateDoc, loading: saving } = useSave();

@@ -20,6 +20,12 @@ from frappe import _
 from frappe.utils import cint, random_string, validate_email_address
 
 from taxmate.api.resource import require_login
+from taxmate.setup.company_owner import (
+	OWNER_FIELD,
+	ensure_company_owner_field,
+	is_app_provider,
+	is_forbidden_owner_user,
+)
 from taxmate.setup.spa_roles import (
 	ALL_MARKER_ROLE_NAMES,
 	MARKER,
@@ -36,13 +42,38 @@ from taxmate.utils.company import ACTIVE_COMPANY_KEY, can_use_company, get_defau
 _SKIP_USERS = frozenset({"Guest", "Administrator"})
 
 
+def _holds_taxmate_owner(user: str | None = None) -> bool:
+	user = user or frappe.session.user
+	return MARKER["owner"] in frappe.get_roles(user)
+
+
 def _require_owner() -> None:
-	if spa_role_of() != "owner":
+	"""Only a real TaxMate Owner for the active company — never Administrator."""
+	user = frappe.session.user
+	if is_app_provider(user) or is_forbidden_owner_user(user):
+		frappe.throw(_("Admins manage the team"), frappe.PermissionError)
+	if not _holds_taxmate_owner(user):
+		frappe.throw(_("Admins manage the team"), frappe.PermissionError)
+	company = _active_company()
+	if not _belongs_to_company(user, company):
 		frappe.throw(_("Admins manage the team"), frappe.PermissionError)
 
 
 def _require_team_read() -> None:
-	if spa_role_of() not in ("owner", "accountant"):
+	"""Owner or accountant of the active company. Providers use onboard, not Team list."""
+	user = frappe.session.user
+	if is_app_provider(user):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	role = spa_role_of(user)
+	if role not in ("owner", "accountant"):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	company = _active_company()
+	if not _belongs_to_company(user, company):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+
+def _require_provider() -> None:
+	if not is_app_provider():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 
@@ -93,9 +124,10 @@ def _can_manage_target(user: str) -> bool:
 
 	An accountant who also works for another business stays visible, but this
 	company's owner cannot change a role that would affect the other business.
+	Providers never manage teammates through Team APIs.
 	"""
-	if _caller_unrestricted():
-		return True
+	if is_app_provider():
+		return False
 	mine = set(user_companies())
 	theirs = set(user_companies(user))
 	return bool(theirs) and theirs <= mine
@@ -216,7 +248,7 @@ def _as_user_row(name: str, *, company: str | None = None) -> dict[str, Any]:
 		"language": doc.language,
 		"user_type": doc.user_type,
 		"enabled": int(doc.enabled or 0),
-		"spa_role": roles[0] if roles else spa_role_of(doc.name),
+		"spa_role": roles[0] if roles else (spa_role_of(doc.name) or "viewer"),
 		"spa_roles": roles,
 		"extra_roles": addon_roles_of(doc.name),
 		"last_active": str(doc.last_active) if doc.last_active else None,
@@ -429,6 +461,87 @@ def set_user_enabled(user: str, enabled: int | str = 0) -> dict[str, Any]:
 	return _as_user_row(user, company=_active_company())
 
 
+@frappe.whitelist(methods=["POST"])
+def onboard_company_owner(
+	company: str,
+	email: str,
+	first_name: str,
+	last_name: str | None = None,
+	mobile_no: str | None = None,
+	send_welcome_email: int | str = 1,
+) -> dict[str, Any]:
+	"""App provider assigns the primary TaxMate Owner for a company.
+
+	Administrator is never the owner — this creates/links a client user, grants
+	TaxMate Owner + Company User Permission, and sets Company.custom_taxmate_owner.
+	"""
+	require_login()
+	_require_provider()
+	ensure_marker_roles()
+	ensure_company_owner_field()
+
+	company = (company or "").strip()
+	email = (email or "").strip().lower()
+	first_name = (first_name or "").strip()
+	if not company or not frappe.db.exists("Company", company):
+		frappe.throw(_("Company not found"))
+	if not first_name:
+		frappe.throw(_("First name is required"))
+	validate_email_address(email, throw=True)
+	if is_forbidden_owner_user(email) or email == "administrator":
+		frappe.throw(_("Administrator cannot be the TaxMate Owner of a company"))
+	if frappe.db.exists("User", email) and is_forbidden_owner_user(email):
+		frappe.throw(_("Administrator cannot be the TaxMate Owner of a company"))
+
+	welcome = cint(send_welcome_email)
+	created = False
+	if frappe.db.exists("User", email):
+		user_name = email
+		if "System Manager" in frappe.get_roles(user_name):
+			frappe.throw(_("System managers cannot be company owners"), frappe.PermissionError)
+	else:
+		user = frappe.new_doc("User")
+		user.email = email
+		user.first_name = first_name
+		user.last_name = (last_name or "").strip()
+		user.mobile_no = (mobile_no or "").strip()
+		user.enabled = 1
+		user.send_welcome_email = welcome
+		user.redirect_url = "/taxmate"
+		if hasattr(user, "default_app"):
+			user.default_app = "taxmate"
+		if not welcome:
+			user.new_password = random_string(16)
+			user.flags.no_welcome_mail = True
+		user.insert(ignore_permissions=True)
+		user_name = user.name
+		created = True
+
+	apply_spa_roles(user_name, ["owner"], extra_roles=[])
+	# Owner is one company — replace other Company UPs if any.
+	for other in _company_permissions(user_name):
+		if other == company:
+			continue
+		frappe.db.delete(
+			"User Permission",
+			{"user": user_name, "allow": "Company", "for_value": other},
+		)
+	_grant_company(user_name, company, multi=False)
+	frappe.defaults.set_user_default(ACTIVE_COMPANY_KEY, company, user_name)
+	frappe.defaults.set_user_default("company", company, user_name)
+
+	frappe.db.set_value("Company", company, OWNER_FIELD, user_name, update_modified=True)
+	frappe.clear_cache(doctype="Company")
+	frappe.clear_cache(user=user_name)
+
+	row = _as_user_row(user_name, company=company)
+	row["company"] = company
+	row["created"] = 1 if created else 0
+	row[OWNER_FIELD] = user_name
+	return row
+
+
+
 def _as_profile(user: str) -> dict[str, Any]:
 	doc = frappe.get_doc("User", user)
 	roles = spa_roles_of(doc.name)
@@ -439,7 +552,7 @@ def _as_profile(user: str) -> dict[str, Any]:
 		"last_name": doc.last_name,
 		"full_name": doc.full_name or doc.first_name or doc.name,
 		"mobile_no": doc.mobile_no,
-		"spa_role": roles[0] if roles else spa_role_of(doc.name),
+		"spa_role": roles[0] if roles else (spa_role_of(doc.name) or "viewer"),
 		"spa_roles": roles,
 		"extra_roles": addon_roles_of(doc.name),
 	}
