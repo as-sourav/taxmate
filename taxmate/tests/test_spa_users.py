@@ -397,6 +397,83 @@ class TestSpaUsers(FrappeTestCase):
 			self._delete(home["name"])
 			self._delete(other["name"])
 
+
+	def test_accountant_team_list_follows_active_company(self):
+		"""Multi-company accountant sees only the active company's roster."""
+		names = frappe.get_all("Company", pluck="name", limit=2, order_by="name asc")
+		if len(names) < 2:
+			self.skipTest("needs two companies")
+		first, second = names[0], names[1]
+		self._use_company(first)
+		accountant = self._invite("accountant")
+		home = self._invite("clerk")
+		self._use_company(second)
+		invite_user(
+			email=accountant["name"],
+			first_name="TaxMate",
+			spa_role="accountant",
+			send_welcome_email=0,
+		)
+		other = self._invite("clerk")
+		try:
+			from taxmate.utils.company import set_active_company
+
+			frappe.set_user(accountant["name"])
+			set_active_company(first)
+			listed = {row["name"] for row in list_users()}
+			self.assertIn(home["name"], listed)
+			self.assertNotIn(other["name"], listed)
+			self.assertTrue(all(row.get("company") == first for row in list_users()))
+
+			set_active_company(second)
+			listed = {row["name"] for row in list_users()}
+			self.assertIn(other["name"], listed)
+			self.assertNotIn(home["name"], listed)
+			self.assertTrue(all(row.get("company") == second for row in list_users()))
+		finally:
+			frappe.set_user("Administrator")
+			self._delete(accountant["name"])
+			self._delete(home["name"])
+			self._delete(other["name"])
+
+	def test_owner_cannot_manage_other_company_user(self):
+		"""Owner of A cannot get/set_role a clerk who only belongs to B."""
+		names = frappe.get_all("Company", pluck="name", limit=2, order_by="name asc")
+		if len(names) < 2:
+			self.skipTest("needs two companies")
+		first, second = names[0], names[1]
+		self._use_company(first)
+		owner = self._invite("owner")
+		self._use_company(second)
+		other = self._invite("clerk")
+		try:
+			from taxmate.utils.company import set_active_company
+
+			frappe.set_user(owner["name"])
+			set_active_company(first)
+			with self.assertRaises(frappe.ValidationError):
+				get_user(user=other["name"])
+			with self.assertRaises((frappe.PermissionError, frappe.ValidationError)):
+				set_user_role(user=other["name"], spa_role="viewer")
+		finally:
+			frappe.set_user("Administrator")
+			self._delete(owner["name"])
+			self._delete(other["name"])
+
+	def test_invite_binds_only_active_company(self):
+		company = self._company()
+		created = self._invite("clerk")
+		try:
+			rows = frappe.get_all(
+				"User Permission",
+				filters={"user": created["name"], "allow": "Company"},
+				pluck="for_value",
+			)
+			self.assertEqual(rows, [company])
+			self.assertEqual(created.get("company"), company)
+		finally:
+			self._delete(created["name"])
+
 	def test_lists_follow_the_company_the_user_is_in(self):
 		names = frappe.get_all("Company", pluck="name", limit=2, order_by="name asc")
 		if len(names) < 2:

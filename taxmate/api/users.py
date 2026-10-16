@@ -1,14 +1,14 @@
 """SPA team admin. User is not a catalog resource.
 
 Invite, role, and enablement go through taxmate.api.users (see get_catalog).
-SPA roles are owner, accountant, clerk, and viewer mapped onto marker Roles.
-Users may hold multiple markers; Frappe unions DocPerms. Optional POSNext add-ons
-are assignable when those Role docs exist on the site.
+Only TaxMate Owners invite/manage; Team list and detail are scoped to the
+caller's active company via Company User Permission rows. SPA roles are owner,
+accountant, clerk, and viewer mapped onto marker Roles. Users may hold multiple
+markers; Frappe unions DocPerms. Optional POSNext add-ons are assignable when
+those Role docs exist on the site.
 
 Callers: frontend TeamList/TeamInvite, taxmate.api.get_catalog actions,
 test_spa_users. Schema: User Has Role child rows (Frappe union of DocPerms).
-User: "roles could be multiple select rather than 1 role. And use frappe standard
-for roles - union of permissions." Also POSNext sidebar when installed.
 """
 
 from __future__ import annotations
@@ -58,11 +58,34 @@ def _caller_unrestricted() -> bool:
 	return user == "Administrator" or "System Manager" in frappe.get_roles(user)
 
 
-def _shares_company(user: str) -> bool:
-	"""True when this teammate works for a company the caller may open."""
-	if _caller_unrestricted():
-		return True
-	return bool(set(user_companies()) & set(user_companies(user)))
+def _company_permissions(user: str) -> list[str]:
+	"""Company names from this user's Company User Permission rows only.
+
+	Does not treat System Manager as “all companies” — Team isolation is always
+	permission-row based so each company's roster stays distinct.
+	"""
+	return frappe.get_all(
+		"User Permission",
+		filters={"user": user, "allow": "Company"},
+		pluck="for_value",
+	)
+
+
+def _belongs_to_company(user: str, company: str) -> bool:
+	"""True when the user has a Company User Permission for this company."""
+	return bool(company) and company in _company_permissions(user)
+
+
+def _active_company(*, invite: bool = False) -> str:
+	"""Caller's active company — Team list, detail, and invites are scoped to it."""
+	company = get_default_company()
+	if not company or not can_use_company(company):
+		frappe.throw(
+			_("Choose a company before inviting someone")
+			if invite
+			else _("Choose a company before managing the team")
+		)
+	return company
 
 
 def _can_manage_target(user: str) -> bool:
@@ -80,24 +103,20 @@ def _can_manage_target(user: str) -> bool:
 
 def _assert_can_manage(user: str) -> None:
 	_assert_taxmate_teammate(user)
+	company = _active_company()
+	if not _belongs_to_company(user, company):
+		frappe.throw(_("User not found"))
 	if not _can_manage_target(user):
 		frappe.throw(_("That user belongs to another company"), frappe.PermissionError)
 
 
 def _invite_company() -> str:
-	company = get_default_company()
-	if not company or not can_use_company(company):
-		frappe.throw(_("Choose a company before inviting someone"))
-	return company
+	return _active_company(invite=True)
 
 
 def _grant_company(user: str, company: str, *, multi: bool) -> None:
 	"""Frappe User Permission on Company. Accountants may hold more than one."""
-	current = frappe.get_all(
-		"User Permission",
-		filters={"user": user, "allow": "Company"},
-		pluck="for_value",
-	)
+	current = _company_permissions(user)
 	if company in current:
 		return
 	if current and not multi:
@@ -184,7 +203,7 @@ def _parse_extra_roles(extra_roles: Any = None) -> list[str] | None:
 	return out
 
 
-def _as_user_row(name: str) -> dict[str, Any]:
+def _as_user_row(name: str, *, company: str | None = None) -> dict[str, Any]:
 	doc = frappe.get_doc("User", name)
 	roles = spa_roles_of(doc.name)
 	return {
@@ -204,6 +223,7 @@ def _as_user_row(name: str) -> dict[str, Any]:
 		"last_login": str(doc.last_login) if getattr(doc, "last_login", None) else None,
 		"creation": str(doc.creation) if doc.creation else None,
 		"can_manage": _can_manage_target(doc.name),
+		"company": company,
 	}
 
 
@@ -212,6 +232,7 @@ def list_users() -> list[dict[str, Any]]:
 	require_login()
 	_require_team_read()
 	ensure_marker_roles()
+	company = _active_company()
 
 	names = {
 		row.parent
@@ -227,9 +248,9 @@ def list_users() -> list[dict[str, Any]]:
 			continue
 		if not frappe.db.exists("User", name):
 			continue
-		if not _shares_company(name):
+		if not _belongs_to_company(name, company):
 			continue
-		out.append(_as_user_row(name))
+		out.append(_as_user_row(name, company=company))
 	out.sort(key=lambda row: (0 if row.get("enabled") else 1, (row.get("full_name") or row["name"]).lower()))
 	return out
 
@@ -240,15 +261,16 @@ def get_user(user: str) -> dict[str, Any]:
 	require_login()
 	_require_team_read()
 	ensure_marker_roles()
+	company = _active_company()
 	user = (user or "").strip()
 	if not user or user in _SKIP_USERS or _is_system_manager(user):
 		frappe.throw(_("User not found"))
 	if not frappe.db.exists("User", user):
 		frappe.throw(_("User not found"))
 	_assert_taxmate_teammate(user)
-	if not _shares_company(user):
+	if not _belongs_to_company(user, company):
 		frappe.throw(_("User not found"))
-	return _as_user_row(user)
+	return _as_user_row(user, company=company)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -279,7 +301,7 @@ def update_user(
 		doc.language = (language or "").strip() or None
 	doc.save(ignore_permissions=True)
 	frappe.clear_cache(user=user)
-	return _as_user_row(user)
+	return _as_user_row(user, company=_active_company())
 
 
 @frappe.whitelist(methods=["POST"])
@@ -333,7 +355,7 @@ def invite_user(
 		held = spa_roles_of(email)
 		if "accountant" in held and "owner" not in held:
 			_grant_company(email, company, multi=True)
-			return _as_user_row(email)
+			return _as_user_row(email, company=company)
 		frappe.throw(_("That user already exists"))
 
 	welcome = cint(send_welcome_email)
@@ -357,7 +379,7 @@ def invite_user(
 	# Every company user, including the owner, is limited by a Frappe User
 	# Permission. Only an accountant may later be granted further companies.
 	_grant_company(user.name, company, multi="accountant" in roles and "owner" not in roles)
-	return _as_user_row(user.name)
+	return _as_user_row(user.name, company=company)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -382,15 +404,11 @@ def set_user_role(
 	if "owner" in roles:
 		# An owner is one company. User Permission is the Frappe record of that,
 		# and a role change must not leave the extra companies in place.
-		held = frappe.get_all(
-			"User Permission",
-			filters={"user": user, "allow": "Company"},
-			pluck="for_value",
-		)
+		held = _company_permissions(user)
 		if len(held) > 1:
 			frappe.throw(_("An owner belongs to one company"))
 	apply_spa_roles(user, roles, extra_roles=addons)
-	return _as_user_row(user)
+	return _as_user_row(user, company=_active_company())
 
 
 @frappe.whitelist(methods=["POST"])
@@ -408,7 +426,7 @@ def set_user_enabled(user: str, enabled: int | str = 0) -> dict[str, Any]:
 	doc.enabled = 1 if cint(enabled) else 0
 	doc.save(ignore_permissions=True)
 	frappe.clear_cache(user=user)
-	return _as_user_row(user)
+	return _as_user_row(user, company=_active_company())
 
 
 def _as_profile(user: str) -> dict[str, Any]:
