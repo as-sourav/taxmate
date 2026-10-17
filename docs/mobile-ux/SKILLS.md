@@ -32,3 +32,12 @@ Priority on conflict: `docs/idp-scan-hardening-prompt.md` > TaxMate tokens / exi
 | frontend-design | Keep TaxMate look; no generic redesign of CaptureDesk |
 | no-ai-slop | Copy, comments, eval baseline docs, commit messages |
 | gstack | Plan eng-review locked; `/cso` `/review` `/qa` `/benchmark` on later PRs |
+
+## Crop-before-OCR (2026-10-17)
+
+| Skill | Applied where |
+|---|---|
+| frontend-design (Anthropic) | Keep TaxMate tokens; crop chrome is functional (handles, dim mask), not decorative |
+| web-design-guidelines / ui-ux-pro-max | 44px corner hits; Escape cancels crop; `aria-label` on handles |
+| idp-scan-hardening §1.4–1.5 | EXIF via `imageOrientation`; long edge 2400; JPEG q0.85; mild contrast; blur gate; user crop before upload |
+| vercel-composition-patterns | `CropFrame` + `prepareImage` split; CaptureDesk owns draft URL lifecycle |

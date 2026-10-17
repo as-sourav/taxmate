@@ -13,8 +13,14 @@ import { METHOD, readableError } from "../../lib/frappe";
 import { t } from "../../i18n/strings";
 import { apiFetch } from "../../mobile/http";
 import { isNative } from "../../mobile/platform";
-import { prepareScanImage } from "./capture/prepareImage";
+import {
+  isImageFile,
+  isPdfFile,
+  prepareScanImage,
+  type CropRect,
+} from "./capture/prepareImage";
 import { cameraAvailable, takePhoto } from "./capture/nativeCamera";
+import { CropFrame } from "./capture/CropFrame";
 import { ScanProgress } from "./capture/ScanProgress";
 
 type Target = {
@@ -146,27 +152,61 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
   const [scanId, setScanId] = useState<string | null>(null);
   const [writes, setWrites] = useState<Write[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
+  /** Raw image awaiting crop; object URL for CropFrame. */
+  const [draft, setDraft] = useState<{ file: File; url: string } | null>(null);
+  const [prepBusy, setPrepBusy] = useState(false);
 
-  const busy = phase !== "idle";
+  const busy = phase !== "idle" || prepBusy;
 
-  async function onPickFile(event: ChangeEvent<HTMLInputElement>) {
-    const next = event.target.files?.[0];
-    if (!next) return;
-    const prepared = await prepareScanImage(next);
-    if ("error_key" in prepared) {
-      setFile(null);
-      setFileUrl(null);
+  function clearDraft() {
+    setDraft((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  }
+
+  async function applyPrepared(source: File, crop: CropRect | null) {
+    setPrepBusy(true);
+    try {
+      const prepared = await prepareScanImage(source, { crop });
+      if ("error_key" in prepared) {
+        setFile(null);
+        setFileUrl(null);
+        setProposals([]);
+        setReview({ ok: false, error_key: prepared.error_key, can_save: false });
+        clearDraft();
+        return;
+      }
+      setFile(prepared.file);
+      setReview(null);
       setProposals([]);
-      setReview({ ok: false, error_key: prepared.error_key, can_save: false });
-      event.target.value = "";
+      setFileUrl(null);
+      setScanId(null);
+      clearDraft();
+    } finally {
+      setPrepBusy(false);
+    }
+  }
+
+  async function beginImageDraft(next: File) {
+    if (isPdfFile(next) || !isImageFile(next)) {
+      await applyPrepared(next, null);
       return;
     }
-    setFile(prepared.file);
+    clearDraft();
+    setFile(null);
     setReview(null);
     setProposals([]);
     setFileUrl(null);
     setScanId(null);
+    setDraft({ file: next, url: URL.createObjectURL(next) });
+  }
+
+  async function onPickFile(event: ChangeEvent<HTMLInputElement>) {
+    const next = event.target.files?.[0];
+    if (!next) return;
     event.target.value = "";
+    await beginImageDraft(next);
   }
 
   async function onTakePhoto() {
@@ -175,16 +215,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
       setReview({ ok: false, error_key: shot.error_key, can_save: false });
       return;
     }
-    const prepared = await prepareScanImage(shot.file);
-    if ("error_key" in prepared) {
-      setReview({ ok: false, error_key: prepared.error_key, can_save: false });
-      return;
-    }
-    setFile(prepared.file);
-    setReview(null);
-    setProposals([]);
-    setFileUrl(null);
-    setScanId(null);
+    await beginImageDraft(shot.file);
   }
 
   useEffect(() => {
@@ -194,11 +225,18 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
     setTarget((preferred ?? ready[0])?.doctype ?? null);
   }, [action, target]);
 
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
   useEffect(() => {
     closeRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        if (draftRef.current) {
+          clearDraft();
+          return;
+        }
         abortRef.current?.abort();
         abortRef.current = null;
         lock.current = false;
@@ -216,6 +254,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
       abortRef.current?.abort();
       abortRef.current = null;
       lock.current = false;
+      if (draftRef.current?.url) URL.revokeObjectURL(draftRef.current.url);
     };
   }, []);
 
@@ -224,6 +263,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
     abortRef.current?.abort();
     abortRef.current = null;
     lock.current = false;
+    clearDraft();
     if (id) {
       void postForm(METHOD.idpCancelScan, { scan_id: id }).catch(() => undefined);
     }
@@ -505,7 +545,22 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
           {surface && !action ? <p className="idp-hint">{t("idp.empty")}</p> : null}
           {action && !action.runnable ? <p className="idp-hint">{t(action.pending_key)}</p> : null}
 
-          {action?.runnable && !review ? (
+          {action?.runnable && !review && draft ? (
+            <CropFrame
+              src={draft.url}
+              busy={prepBusy}
+              onCancel={() => {
+                clearDraft();
+                setReview(null);
+              }}
+              onConfirm={(crop) => {
+                if (!draft) return;
+                void applyPrepared(draft.file, crop);
+              }}
+            />
+          ) : null}
+
+          {action?.runnable && !review && !draft ? (
             <div className="idp-form">
               <p className="idp-kicker">{t("idp.pick")}</p>
               <div className="idp-targets" role="group" aria-label={t("idp.pick")}>
@@ -605,6 +660,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
                   setWrites([]);
                   setFile(null);
                   setFileUrl(null);
+                  clearDraft();
                 }}
               >
                 {t("idp.again")}
