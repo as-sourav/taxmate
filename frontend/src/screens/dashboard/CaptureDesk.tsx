@@ -13,6 +13,9 @@ import { METHOD, readableError } from "../../lib/frappe";
 import { t } from "../../i18n/strings";
 import { apiFetch } from "../../mobile/http";
 import { isNative } from "../../mobile/platform";
+import { prepareScanImage } from "./capture/prepareImage";
+import { cameraAvailable, takePhoto } from "./capture/nativeCamera";
+import { ScanProgress } from "./capture/ScanProgress";
 
 type Target = {
   doctype: string;
@@ -68,11 +71,16 @@ type Review = {
   writes?: Write[];
   proposals?: Proposal[];
   stage_log?: Stage[];
+  stage_timings?: Record<string, number>;
+  status?: string;
+  review?: Review;
+  field_confidence?: Record<string, { confidence?: number; ok?: boolean; flag?: string | null }>;
   can_save?: boolean;
   can_submit?: boolean;
   can_delete?: boolean;
   used_llm?: boolean;
   save_key?: string | null;
+  scan_id?: string | null;
   route?: string | null;
   name?: string;
   matches?: { name: string; label: string; route: string | null }[];
@@ -135,16 +143,16 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
   const [stageIdx, setStageIdx] = useState(0);
   const [review, setReview] = useState<Review | null>(null);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [scanId, setScanId] = useState<string | null>(null);
   const [writes, setWrites] = useState<Write[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
 
   const busy = phase !== "idle";
 
-  function onPickFile(event: ChangeEvent<HTMLInputElement>) {
+  async function onPickFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0];
-    /* Cancel / empty change must not wipe a prior photo or file. */
     if (!next) return;
-    const prepared = prepareScanFile(next);
+    const prepared = await prepareScanImage(next);
     if ("error_key" in prepared) {
       setFile(null);
       setFileUrl(null);
@@ -157,8 +165,26 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
     setReview(null);
     setProposals([]);
     setFileUrl(null);
-    /* Allow picking the same photo again after cancel/replace. */
+    setScanId(null);
     event.target.value = "";
+  }
+
+  async function onTakePhoto() {
+    const shot = await takePhoto();
+    if (!shot.ok) {
+      setReview({ ok: false, error_key: shot.error_key, can_save: false });
+      return;
+    }
+    const prepared = await prepareScanImage(shot.file);
+    if ("error_key" in prepared) {
+      setReview({ ok: false, error_key: prepared.error_key, can_save: false });
+      return;
+    }
+    setFile(prepared.file);
+    setReview(null);
+    setProposals([]);
+    setFileUrl(null);
+    setScanId(null);
   }
 
   useEffect(() => {
@@ -193,24 +219,60 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  useEffect(() => {
-    if (!busy || stages.length === 0) return;
-    setStageIdx(phase === "uploading" ? 0 : phase === "saving" ? stages.length - 1 : 1);
-    const id = window.setInterval(() => {
-      setStageIdx((prev) => {
-        if (phase === "uploading") return 0;
-        if (phase === "saving") return Math.max(stages.length - 1, 0);
-        return Math.min(prev + 1, Math.max(stages.length - 2, 0));
-      });
-    }, 2800);
-    return () => window.clearInterval(id);
-  }, [busy, phase, stages.length]);
-
   function requestClose() {
+    const id = scanId;
     abortRef.current?.abort();
     abortRef.current = null;
     lock.current = false;
+    if (id) {
+      void postForm(METHOD.idpCancelScan, { scan_id: id }).catch(() => undefined);
+    }
     onClose();
+  }
+
+  async function pollScan(
+    id: string,
+    doctype: string,
+    signal: AbortSignal,
+  ): Promise<Review | null> {
+    const started = Date.now();
+    const maxMs = 10 * 60 * 1000;
+    while (!signal.aborted) {
+      if (Date.now() - started > maxMs) {
+        return { ok: false, error_key: "idp.readSlow", can_save: false, scan_id: id };
+      }
+      const status = await postForm(
+        METHOD.idpGetScan,
+        { scan_id: id, target_doctype: doctype },
+        signal,
+      );
+      if (signal.aborted) return null;
+      const st = String(status.status || "");
+      // Surface stages: upload, ocr, parties, items, review — map server status coarsely.
+      if (st === "Extracting" || st === "Reading") setStageIdx(Math.min(1, Math.max(stages.length - 1, 0)));
+      else if (st === "Ready" || st === "Review") setStageIdx(Math.max(stages.length - 1, 0));
+      if ((status.status === "Ready" || status.status === "Review") && status.review) {
+        return status.review as Review;
+      }
+      if (status.status === "Failed" || status.status === "Cancelled") {
+        return {
+          ok: false,
+          error_key: String(status.error_key || (status.status === "Cancelled" ? "cancelled" : "idp.readFailed")),
+          can_save: false,
+          scan_id: id,
+        };
+      }
+      if (status.ok === false && status.error_key && status.status !== "Extracting" && status.status !== "Reading") {
+        return {
+          ok: false,
+          error_key: String(status.error_key),
+          can_save: false,
+          scan_id: id,
+        };
+      }
+      await new Promise((r) => window.setTimeout(r, 1200));
+    }
+    return null;
   }
 
   async function readFile() {
@@ -220,23 +282,11 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
     abortRef.current = ac;
     setReview(null);
     setProposals([]);
+    setScanId(null);
     setPhase("uploading");
     setStageIdx(0);
-    let timedOut = false;
-    const slow = window.setTimeout(() => {
-      timedOut = true;
-      ac.abort();
-      lock.current = false;
-      setPhase("idle");
-      setReview({ ok: false, error_key: "idp.readSlow" });
-    }, 100_000);
     try {
-      const prepared = prepareScanFile(file);
-      if ("error_key" in prepared) {
-        setReview({ ok: false, error_key: prepared.error_key, can_save: false });
-        return;
-      }
-      const uploaded = await postFile(prepared.file, ac.signal);
+      const uploaded = await postFile(file, ac.signal);
       if (ac.signal.aborted) return;
       if (uploaded.success === false || uploaded.error_key) {
         setReview({
@@ -265,7 +315,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         },
         ac.signal,
       );
-      if (ac.signal.aborted || timedOut) return;
+      if (ac.signal.aborted) return;
       if (result.ok === false && result.error_key) {
         setReview({
           ...result,
@@ -277,12 +327,25 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         setStageIdx(stages.length - 1);
         return;
       }
-      setReview(result);
-      setWrites(Array.isArray(result.writes) ? result.writes : []);
-      setProposals(Array.isArray(result.proposals) ? cloneProposals(result.proposals) : []);
+      const id = result.scan_id ? String(result.scan_id) : "";
+      setScanId(id || null);
+      let reviewResult = result as Review;
+      if (result.step === "processing" && id) {
+        const polled = await pollScan(id, target, ac.signal);
+        if (ac.signal.aborted) return;
+        if (!polled) {
+          setReview({ ok: false, error_key: "idp.readFailed", can_save: false });
+          return;
+        }
+        reviewResult = polled;
+      }
+      setReview(reviewResult);
+      if (reviewResult.scan_id) setScanId(String(reviewResult.scan_id));
+      setWrites(Array.isArray(reviewResult.writes) ? reviewResult.writes : []);
+      setProposals(Array.isArray(reviewResult.proposals) ? cloneProposals(reviewResult.proposals) : []);
       setStageIdx(stages.length - 1);
     } catch (err) {
-      if (ac.signal.aborted || timedOut) return;
+      if (ac.signal.aborted) return;
       const detail = readableError(err).join(" ").trim();
       const useless =
         !detail ||
@@ -297,8 +360,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         can_save: false,
       });
     } finally {
-      window.clearTimeout(slow);
-      if (!ac.signal.aborted && !timedOut) {
+      if (!ac.signal.aborted) {
         lock.current = false;
         setPhase("idle");
       }
@@ -307,7 +369,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
   }
 
   async function saveDraft(submit = false) {
-    if (lock.current || !action || !target || !fileUrl) return;
+    if (lock.current || !action || !target || !fileUrl || !scanId) return;
     if (!proposalsReady(proposals)) return;
     lock.current = true;
     const ac = new AbortController();
@@ -321,6 +383,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
           action: action.id,
           target_doctype: target,
           file_url: fileUrl,
+          scan_id: scanId,
           query: "",
           fills: JSON.stringify(fills),
           proposals: JSON.stringify(proposals),
@@ -467,23 +530,35 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
                     role="group"
                     aria-label={t("idp.sources")}
                   >
-                    <label className={`idp-drop${file ? " has-file" : ""}`}>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
+                    {cameraAvailable() ? (
+                      <button
+                        type="button"
+                        className={`idp-drop${file ? " has-file" : ""}`}
                         disabled={busy}
-                        onChange={onPickFile}
-                      />
-                      <span className="idp-drop-title">{t("idp.camera")}</span>
-                      <span className="idp-drop-hint">{t("idp.cameraHint")}</span>
-                    </label>
+                        onClick={() => void onTakePhoto()}
+                      >
+                        <span className="idp-drop-title">{t("idp.camera")}</span>
+                        <span className="idp-drop-hint">{t("idp.cameraHint")}</span>
+                      </button>
+                    ) : (
+                      <label className={`idp-drop${file ? " has-file" : ""}`}>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          disabled={busy}
+                          onChange={(e) => void onPickFile(e)}
+                        />
+                        <span className="idp-drop-title">{t("idp.camera")}</span>
+                        <span className="idp-drop-hint">{t("idp.cameraHint")}</span>
+                      </label>
+                    )}
                     <label className={`idp-drop${file ? " has-file" : ""}`}>
                       <input
                         type="file"
                         accept={fileAccept(surface?.accept)}
                         disabled={busy}
-                        onChange={onPickFile}
+                        onChange={(e) => void onPickFile(e)}
                       />
                       <span className="idp-drop-title">{t("idp.drop")}</span>
                       <span className="idp-drop-hint">{t("idp.dropHint")}</span>
@@ -501,7 +576,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
                     type="file"
                     accept={fileAccept(surface?.accept)}
                     disabled={busy}
-                    onChange={onPickFile}
+                    onChange={(e) => void onPickFile(e)}
                   />
                   <span className="idp-drop-title">{file ? file.name : t("idp.drop")}</span>
                   <span className="idp-drop-hint">{t("idp.dropHint")}</span>
@@ -543,7 +618,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
             </p>
           ) : null}
 
-          {liveStages.length > 0 ? <StageList stages={liveStages} /> : null}
+          {liveStages.length > 0 ? <ScanProgress stages={liveStages} /> : null}
 
           {review ? (
             <ReviewBlock
@@ -585,20 +660,6 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         ) : null}
       </div>
     </div>
-  );
-}
-
-function StageList({ stages }: { stages: Stage[] }) {
-  /* Status text above is aria-live; this list is visual only so the 2.8s
-     client ticker does not spam screen readers with fake stage changes. */
-  return (
-    <ol className="idp-stages" aria-hidden="true">
-      {stages.map((row) => (
-        <li key={row.key} data-status={row.status || "pending"}>
-          {t(row.label_key)}
-        </li>
-      ))}
-    </ol>
   );
 }
 
@@ -845,7 +906,6 @@ function trapTab(event: KeyboardEvent, root: HTMLElement) {
   }
 }
 
-const SCAN_MAX_BYTES = 25 * 1024 * 1024;
 
 /** Extensions from the surface plus MIME types Android/iOS WebViews honour. */
 function fileAccept(exts: string[] | undefined): string {
@@ -854,33 +914,6 @@ function fileAccept(exts: string[] | undefined): string {
 }
 
 /** Normalize camera quirks client-side before upload; reject HEIC/empty/huge early. */
-function prepareScanFile(file: File): { file: File } | { error_key: string } {
-  if (!file || file.size <= 0) return { error_key: "idp.emptyFile" };
-  if (file.size > SCAN_MAX_BYTES) return { error_key: "idp.tooLarge" };
-  const name = (file.name || "document").trim() || "document";
-  const type = (file.type || "").toLowerCase().split(";")[0].trim();
-  if (type.includes("heic") || type.includes("heif") || /\.hei[cf]$/i.test(name)) {
-    return { error_key: "idp.needJpeg" };
-  }
-  let nextType = type;
-  let nextName = name;
-  if (nextType === "image/jpg" || nextType === "image/pjpeg") nextType = "image/jpeg";
-  if (!nextType || nextType === "application/octet-stream" || nextType === "binary/octet-stream") {
-    if (/\.pdf$/i.test(nextName)) nextType = "application/pdf";
-    else if (/\.png$/i.test(nextName)) nextType = "image/png";
-    else if (/\.webp$/i.test(nextName)) nextType = "image/webp";
-    else if (/\.(jpe?g)$/i.test(nextName)) nextType = "image/jpeg";
-    else {
-      // Phone camera often omits a type and a useful name — treat as JPEG.
-      nextType = "image/jpeg";
-      if (!/\.[a-z0-9]+$/i.test(nextName)) nextName = `${nextName}.jpg`;
-    }
-  }
-  if (nextType === "image/jpeg" && !/\.(jpe?g)$/i.test(nextName)) nextName = `${nextName}.jpg`;
-  if (nextType === file.type && nextName === file.name) return { file };
-  return { file: new File([file], nextName, { type: nextType, lastModified: file.lastModified }) };
-}
-
 function scanHasContent(review: Review, proposals: Proposal[]): boolean {
   return Boolean(
     (review.lines && review.lines.length > 0) ||
@@ -935,7 +968,7 @@ async function postFile(file: File, signal: AbortSignal): Promise<Record<string,
 async function postForm(
   method: string,
   args: Record<string, string>,
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<Review> {
   const res = await apiFetch(`/api/method/${method}`, {
     method: "POST",

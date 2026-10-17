@@ -315,6 +315,13 @@ def get_catalog() -> dict[str, Any]:
 			{"name": "idp_upload", "method": "taxmate.api.idp_desk.upload"},
 			{"name": "idp_run", "method": "taxmate.api.idp_desk.run"},
 			{"name": "idp_save", "method": "taxmate.api.idp_desk.save"},
+			{"name": "idp_get_scan", "method": "taxmate.api.idp_desk.get_scan"},
+			{"name": "idp_cancel_scan", "method": "taxmate.api.idp_desk.cancel_scan"},
+			{"name": "idp_scan_create", "method": "taxmate.api.idp_scan.create_scan"},
+			{"name": "idp_scan_get", "method": "taxmate.api.idp_scan.get_scan"},
+			{"name": "idp_scan_save_edits", "method": "taxmate.api.idp_scan.save_edits"},
+			{"name": "idp_scan_make_draft", "method": "taxmate.api.idp_scan.make_draft"},
+			{"name": "idp_scan_cancel", "method": "taxmate.api.idp_scan.cancel_scan"},
 			*_EXISTING_ACTIONS,
 		],
 	}

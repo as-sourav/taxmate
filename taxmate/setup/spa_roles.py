@@ -59,7 +59,12 @@ LEGACY_DESK_ROLES: frozenset[str] = frozenset(
 MANAGED_ROLES: frozenset[str] = frozenset(
 	(*MARKER.values(), *_LEGACY_MARKER_RENAMES.keys(), *LEGACY_DESK_ROLES)
 )
-READ_ONLY_DOCTYPES: frozenset[str] = frozenset({"GL Entry", "Fiscal Year"})
+READ_ONLY_DOCTYPES: frozenset[str] = frozenset({
+	"GL Entry",
+	"Fiscal Year",
+	"IDP Extraction Template",
+	"IDP Extraction Correction",
+})
 SETTINGS_DOCTYPES: frozenset[str] = frozenset(
 	{
 		"Company",
@@ -468,9 +473,14 @@ def _ensure_books_perms() -> None:
 			try:
 				if existing:
 					# Refresh when the sample SI/JE check fails, or when a row
-					# exists but has no read (broken / partial seed).
-					needs_update = refresh_flags or not cint(
-						frappe.db.get_value("Custom DocPerm", existing, "read")
+					# exists but has no read (broken / partial seed), or when the
+					# DocType is marked read-only for SPA markers (IDP templates).
+					needs_update = (
+						refresh_flags
+						or doctype in READ_ONLY_DOCTYPES
+						or not cint(
+							frappe.db.get_value("Custom DocPerm", existing, "read")
+						)
 					)
 					if needs_update:
 						frappe.db.set_value("Custom DocPerm", existing, flags, update_modified=False)
