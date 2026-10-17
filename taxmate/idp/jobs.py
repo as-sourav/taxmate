@@ -38,6 +38,15 @@ def _cancelled(scan_id: str) -> bool:
 	return bool(row.cancel_requested) or row.status == scan_mod.CANCELLED
 
 
+def _json_value(value: Any) -> str:
+	"""Encode dict/list for db.set_value — raw dicts break MariaDB on JSON columns."""
+	if value is None:
+		return "{}"
+	if isinstance(value, str):
+		return value
+	return frappe.as_json(value)
+
+
 def enqueue_scan(*, scan_id: str, file_url: str, target_doctype: str, user: str) -> None:
 	frappe.enqueue(
 		"taxmate.idp.jobs.run_scan_job",
@@ -65,13 +74,18 @@ def run_scan_job(
 
 	def stage(name: str) -> None:
 		timings[name] = round((time.perf_counter() - t0) * 1000.0, 1)
-		frappe.db.set_value(
-			scan_mod.SCAN_DOCTYPE,
-			scan_id,
-			{"stage_timings_json": timings},
-			update_modified=False,
-		)
-		_publish(scan_id, name, "active", timings=timings)
+		# Timing write must never abort OCR — set_value + raw dict used to SQL-crash the job.
+		try:
+			frappe.db.set_value(
+				scan_mod.SCAN_DOCTYPE,
+				scan_id,
+				{"stage_timings_json": _json_value(timings)},
+				update_modified=False,
+			)
+			frappe.db.commit()
+		except Exception:
+			frappe.log_error(title="TaxMate scan stage timing write failed")
+		_publish(scan_id, name, "active", timings=dict(timings))
 
 	try:
 		if _cancelled(scan_id):
@@ -120,8 +134,8 @@ def run_scan_job(
 		doc.ocr_confidence = extracted.get("confidence")
 		doc.path_taken = "hybrid" if extracted.get("used_llm") else "rule"
 		doc.mapper_source = doc.path_taken
-		doc.stage_timings_json = timings
-		doc.field_confidence_json = extracted.get("field_confidence") or {}
+		doc.stage_timings_json = _json_value(timings)
+		doc.field_confidence_json = _json_value(extracted.get("field_confidence") or {})
 		doc.error_key = None
 		# Same enrichment path as IDP run_read (in-memory before freeze).
 		from taxmate.idp.hooks_idp import idp_after_extract
@@ -132,11 +146,18 @@ def run_scan_job(
 			frappe.log_error(title="TaxMate idp_after_extract failed")
 		doc.status = scan_mod.REVIEW
 		doc.save(ignore_permissions=False)
+		frappe.db.commit()
 		stage("review")
-		_publish(scan_id, "review", "done", timings=timings)
+		_publish(scan_id, "review", "done", timings=dict(timings))
 	except Exception as exc:
 		frappe.log_error(title="TaxMate scan job failed", message=frappe.get_traceback())
-		error_key = "ocr_timeout" if "timeout" in str(exc).lower() else "idp.readFailed"
+		msg = str(exc).lower()
+		if "timeout" in msg:
+			error_key = "ocr_timeout"
+		elif "paddle" in msg or "ocr" in msg:
+			error_key = "idp.readFailed"
+		else:
+			error_key = "idp.readFailed"
 		if not _cancelled(scan_id):
 			frappe.db.set_value(
 				scan_mod.SCAN_DOCTYPE,
@@ -147,4 +168,5 @@ def run_scan_job(
 					"error_message": str(exc)[:500],
 				},
 			)
+			frappe.db.commit()
 		_publish(scan_id, "failed", "failed", error_key=error_key)

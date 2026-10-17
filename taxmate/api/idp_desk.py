@@ -393,6 +393,10 @@ def get_scan(scan_id: str, target_doctype: str | None = None) -> dict:
 	elif doc.status == scan_mod.FAILED:
 		payload["ok"] = False
 		payload["error_key"] = doc.error_key or "idp.readFailed"
+		# Surface worker exception text so the SPA can show more than the generic key.
+		detail = (getattr(doc, "error_message", None) or "").strip()
+		if detail:
+			payload["detail"] = detail[:400]
 	return payload
 
 
