@@ -157,7 +157,7 @@ def catalog_reports() -> list[dict[str, str]]:
 		if frappe.db.get_value("Report", report, "disabled"):
 			continue
 		seen.add(report)
-		out.append({"label": label, "report": report})
+		out.append({"label": frappe._(label), "report": report})
 	return out
 
 

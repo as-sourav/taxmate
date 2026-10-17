@@ -317,6 +317,89 @@ class TestApiReportsAndHome(FrappeTestCase):
 		self.assertIn("Accounts Receivable", reports)
 		self.assertIn("Accounts Payable", reports)
 
+	def test_list_reports_labels_follow_language(self):
+		"""Catalog labels go through frappe._ so Arabic uses the translation catalogs."""
+		from frappe.translate import MERGED_TRANSLATION_KEY
+
+		previous = frappe.local.lang
+		try:
+			frappe.cache.hdel(MERGED_TRANSLATION_KEY, ["en", "ar"])
+			frappe.local.lang = "en"
+			en_rows = {row["report"]: row["label"] for row in list_reports()}
+			self.assertEqual(en_rows["Balance Sheet"], "Balance Sheet")
+			self.assertEqual(en_rows["Profit and Loss Statement"], "Profit and Loss")
+
+			frappe.cache.hdel(MERGED_TRANSLATION_KEY, "ar")
+			frappe.local.lang = "ar"
+			ar_rows = {row["report"]: row["label"] for row in list_reports()}
+			self.assertEqual(ar_rows["Balance Sheet"], "المركز المالي")
+			self.assertEqual(ar_rows["Profit and Loss Statement"], "الربح والخسارة")
+			self.assertEqual(frappe._("Account"), "الحساب")
+			self.assertEqual(frappe._("Currency"), "العملة")
+			self.assertEqual(frappe._("Profit and Loss Statement"), "الأرباح والخسائر")
+			if "UAE VAT 201" in ar_rows:
+				self.assertEqual(ar_rows["UAE VAT 201"], "ضريبة القيمة المضافة 201")
+		finally:
+			frappe.local.lang = previous
+
+	def test_ledger_label_translates_name_and_keeps_abbreviation(self):
+		from frappe.translate import MERGED_TRANSLATION_KEY
+
+		from taxmate.utils.localize import ledger_label, localize_report
+
+		previous = frappe.local.lang
+		try:
+			frappe.cache.hdel(MERGED_TRANSLATION_KEY, "ar")
+			frappe.local.lang = "ar"
+			self.assertEqual(ledger_label("Revenue - XSm"), "الإيرادات - XSm")
+			self.assertEqual(ledger_label("Main Safe"), "الخزنة الرئيسية")
+			self.assertEqual(ledger_label("Sales of same region"), "مبيعات المنطقة نفسها")
+			self.assertEqual(ledger_label("Petty Cash - Others"), "عهدة نثرية — أخرى")
+			self.assertEqual(ledger_label("Accrued - Salaries"), "مستحق — الرواتب")
+			self.assertEqual(ledger_label("1000 - Revenue"), "1000 - Revenue")
+			self.assertEqual(ledger_label("Cost Of Goods Sold"), "تكلفة البضاعة المباعة")
+			self.assertEqual(ledger_label("Inventory"), "المخزون")
+			self.assertEqual(ledger_label("Stock in Hand"), "المخزون المتاح")
+			self.assertEqual(ledger_label("Stock In Hand"), "المخزون المتاح")
+			self.assertEqual(ledger_label("'إجمالي الإيرادات (دائن)'"), "إجمالي الإيرادات (دائن)")
+
+			result = localize_report(
+				"Profit and Loss Statement",
+				{
+					"columns": [{"label": "Account", "fieldname": "account"}],
+					"result": [
+						{
+							"account": "Revenue - XSm",
+							"acc_name": "Revenue",
+							"account_name": "1000 - Revenue",
+							"parent_account": "Income - XSm",
+							"voucher_type": "Sales Invoice",
+						},
+						{
+							"account": "Petty Cash - Others - XSm",
+							"acc_name": "Petty Cash - Others",
+						},
+						{"account": "'إجمالي الإيرادات (دائن)'"},
+					],
+				},
+			)
+			row = result["result"][0]
+			self.assertEqual(row["account"], "Revenue - XSm")
+			self.assertEqual(row["parent_account"], "Income - XSm")
+			self.assertEqual(row["voucher_type"], "Sales Invoice")
+			self.assertEqual(row["account_name"], "1000 - Revenue")
+			self.assertEqual(row["acc_name"], "الإيرادات")
+			self.assertEqual(row["account_label"], "الإيرادات - XSm")
+			self.assertEqual(result["result"][1]["account"], "Petty Cash - Others - XSm")
+			self.assertEqual(result["result"][1]["acc_name"], "عهدة نثرية — أخرى")
+			self.assertEqual(result["result"][1]["account_label"], "عهدة نثرية — أخرى - XSm")
+			self.assertEqual(result["result"][2]["account"], "'إجمالي الإيرادات (دائن)'")
+			self.assertEqual(result["result"][2]["account_label"], "إجمالي الإيرادات (دائن)")
+			self.assertEqual(result["report_label"], "الأرباح والخسائر")
+			self.assertEqual(result["columns"][0]["label"], "الحساب")
+		finally:
+			frappe.local.lang = previous
+
 	def test_home_kpis_shape(self):
 		home = get_home()
 		self.assertIn("kpis", home)

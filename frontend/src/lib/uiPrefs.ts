@@ -59,9 +59,12 @@ export function applySessionPrefs(prefs: {
   return out;
 }
 
-export async function persistLang(lang: Lang): Promise<void> {
+/** Save User.language first. Local strings flip only after Frappe accepts it. */
+export async function persistLang(lang: Lang): Promise<boolean> {
+  const saved = await postPrefs({ language: lang });
+  if (!saved) return false;
   setLang(lang);
-  await postPrefs({ language: lang });
+  return true;
 }
 
 export async function persistTheme(theme: Theme): Promise<void> {

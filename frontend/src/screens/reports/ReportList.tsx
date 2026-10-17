@@ -21,6 +21,7 @@ import {
   writePinned,
   type ReportSection,
 } from "../../lib/reportCatalog";
+import { useLang } from "../../lib/i18n";
 import { useIsPhone } from "../../lib/useMedia";
 import { t } from "../../i18n/strings";
 import { ErrorBox, Loading, PageHead, Card } from "../../components/ui";
@@ -91,12 +92,17 @@ export default function ReportList() {
   const nav = useNavigate();
   const phone = useIsPhone();
   const session = useSession();
+  const { lang } = useLang();
   const search = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [pinned, setPinned] = useState<string[]>(() => readPinned());
 
-  const catalog = useFrappeGetCall<{ message: CatalogReport[] }>(METHOD.listReports);
+  const catalog = useFrappeGetCall<{ message: CatalogReport[] }>(
+    METHOD.listReports,
+    undefined,
+    `reports-catalog-${lang}`,
+  );
   const badgeCall = useFrappeGetCall<{ message: BadgePayload }>(
     METHOD.reportBadges,
     { company: session.company },

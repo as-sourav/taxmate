@@ -2,8 +2,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { t } from "../i18n/strings";
-import { useLang } from "../lib/i18n";
-import { persistLang } from "../lib/uiPrefs";
+import { useSwitchLang } from "../lib/useSwitchLang";
 import TaxMateMark from "./TaxMateMark";
 import type { BioKind } from "./biometric";
 import { PIN_LENGTH } from "./pin";
@@ -17,7 +16,7 @@ export function bioName(kind: BioKind): string {
 }
 
 export function LangToggle() {
-  const { lang, set } = useLang();
+  const { lang, toggle } = useSwitchLang();
   return (
     <button
       type="button"
@@ -25,9 +24,7 @@ export function LangToggle() {
       aria-label={t("mob.lang.label")}
       lang={lang === "ar" ? "en" : "ar"}
       onClick={() => {
-        const next = lang === "ar" ? "en" : "ar";
-        set(next);
-        void persistLang(next);
+        void toggle();
       }}
     >
       {t("mob.lang.toggle")}
