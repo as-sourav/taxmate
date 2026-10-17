@@ -48,17 +48,22 @@ def find_ready_scan(
 	pipeline_version: int = PIPELINE_VERSION,
 ) -> str | None:
 	"""Return existing Ready scan name for same bytes + target + version."""
-	name = frappe.db.get_value(
-		SCAN_DOCTYPE,
-		{
-			"file_sha256": file_sha256_hex,
-			"target_doctype": target_doctype,
-			"pipeline_version": pipeline_version,
-			"status": READY,
-			"user": frappe.session.user,
-		},
-		"name",
-	)
+	try:
+		name = frappe.db.get_value(
+			SCAN_DOCTYPE,
+			{
+				"file_sha256": file_sha256_hex,
+				"target_doctype": target_doctype,
+				"pipeline_version": pipeline_version,
+				"status": READY,
+				"user": frappe.session.user,
+			},
+			"name",
+		)
+	except Exception:
+		# Schema may lag (missing Scan columns on an older IDP install).
+		frappe.clear_last_message()
+		return None
 	return str(name) if name else None
 
 

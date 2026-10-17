@@ -224,6 +224,41 @@ div.od-cmp-i:hover{background:transparent}
 }
 .idp-drop-hint{font-size:12px; color:var(--muted); pointer-events:none}
 .idp-run{align-self:stretch; min-height:44px; margin-block-start:4px}
+.idp-crop{display:flex; flex-direction:column; gap:8px; margin:4px 0 8px}
+.idp-crop-stage{
+  position:relative; width:100%; aspect-ratio:3/4; max-height:min(52vh, 420px);
+  background:var(--sunk); border:1px solid var(--border); border-radius:var(--r);
+  overflow:hidden; touch-action:none; user-select:none;
+}
+.idp-crop-img{
+  display:block; width:100%; height:100%; object-fit:contain;
+  pointer-events:none; background:#111;
+}
+.idp-crop-box{
+  position:absolute; box-sizing:border-box;
+  border:2px solid var(--brand); cursor:move;
+  outline:9999px solid color-mix(in srgb, #000 45%, transparent);
+  background:transparent;
+}
+.idp-crop-handle{
+  position:absolute; width:44px; height:44px; padding:0; margin:0;
+  border:0; background:transparent; cursor:nwse-resize;
+}
+.idp-crop-handle::after{
+  content:""; position:absolute; width:14px; height:14px;
+  border:2.5px solid var(--brand); background:var(--panel, #fff);
+  border-radius:2px;
+}
+.idp-crop-handle-nw{top:-6px; left:-6px; cursor:nwse-resize}
+.idp-crop-handle-nw::after{top:10px; left:10px; border-right:0; border-bottom:0}
+.idp-crop-handle-ne{top:-6px; right:-6px; cursor:nesw-resize}
+.idp-crop-handle-ne::after{top:10px; right:10px; border-left:0; border-bottom:0}
+.idp-crop-handle-sw{bottom:-6px; left:-6px; cursor:nesw-resize}
+.idp-crop-handle-sw::after{bottom:10px; left:10px; border-right:0; border-top:0}
+.idp-crop-handle-se{bottom:-6px; right:-6px; cursor:nwse-resize}
+.idp-crop-handle-se::after{bottom:10px; right:10px; border-left:0; border-top:0}
+.idp-crop-actions{display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end}
+.idp-crop-actions .btn{min-height:44px}
 .idp-jobs{display:flex; flex-wrap:wrap; gap:8px}
 .idp-file{display:flex; flex-direction:column; gap:4px; margin:10px 0; font-size:13px}
 .idp-file input[type="text"],
