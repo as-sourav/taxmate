@@ -35,6 +35,7 @@ from frappe.utils import add_months, cint, flt, getdate, today
 from taxmate.api.resource import assert_company_read, require_login
 from taxmate.setup.spa_roles import require_spa_role
 from taxmate.utils.company import get_default_company
+from taxmate.utils.localize import ledger_label
 
 PERIODS = ("month", "quarter", "year")
 AGE_BUCKETS = ("current", "1_30", "31_60", "61_90", "90_plus")
@@ -392,7 +393,7 @@ class _Ctx:
 			(
 				{
 					"name": a.name,
-					"label": a.account_name,
+					"label": ledger_label(a.account_name),
 					"type": a.account_type,
 					"balance": round(bal.get(a.name, 0.0), 2),
 				}
@@ -524,7 +525,7 @@ class _Ctx:
 			(
 				{
 					"account": acc,
-					"label": names.get(acc, acc),
+					"label": ledger_label(names.get(acc, acc)),
 					"budget": round(p, 2),
 					"actual": round(actual.get(acc, 0.0), 2),
 				}
@@ -570,7 +571,7 @@ class _Ctx:
 		sums = self._gl_sum_by_account([a.name for a in acc], self.b["start"], self.b["end"])
 		names = {a.name: a.account_name for a in acc}
 		top = sorted(((k, v) for k, v in sums.items() if v > 0), key=lambda kv: -kv[1])[:5]
-		return [{"account": k, "label": names.get(k, k), "value": round(v, 2)} for k, v in top]
+		return [{"account": k, "label": ledger_label(names.get(k, k)), "value": round(v, 2)} for k, v in top]
 
 	def overdue_invoices(self) -> list[dict]:
 		if not self._can("Sales Invoice"):

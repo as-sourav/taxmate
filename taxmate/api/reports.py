@@ -10,6 +10,7 @@ from frappe import _
 from taxmate.api import catalog_reports
 from taxmate.api.resource import _parse, assert_company_read, require_login
 from taxmate.utils.company import get_default_company
+from taxmate.utils.localize import localize_report
 
 
 def assert_allowed_report(report_name: str) -> None:
@@ -40,12 +41,16 @@ def run_report(report_name: str, filters=None, ignore_prepared_report: bool = Tr
 	assert_company_read(filters.get("company"))
 	from frappe.desk.query_report import run
 
-	return run(
+	result = run(
 		report_name,
 		filters=filters,
 		ignore_prepared_report=ignore_prepared_report,
 		are_default_filters=False,
 	)
+	# Report id stays English for the route. The heading and account labels follow User.language.
+	if isinstance(result, dict):
+		localize_report(report_name, result)
+	return result
 
 
 def _as_filter_dict(filters) -> dict:

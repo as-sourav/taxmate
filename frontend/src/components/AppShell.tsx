@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useFrappeGetCall } from "frappe-react-sdk";
 
-import { useLang } from "../lib/i18n";
+import { useSwitchLang } from "../lib/useSwitchLang";
 import { appearance } from "../lib/theme";
-import { persistLang, persistThemeToggle } from "../lib/uiPrefs";
+import { persistThemeToggle } from "../lib/uiPrefs";
 import { useSession } from "../lib/session";
 import { canOpenPosNext, canViewTeam } from "../lib/roles";
 import { buildNav, groupedNav, groupForPath, FeatureFlags } from "../lib/nav";
@@ -42,7 +42,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       return !c;
     });
   }
-  const { lang, set: setLocale } = useLang();
+  const { lang, toggle: switchLang } = useSwitchLang();
   const [mode, setMode] = useState(appearance);
   useEffect(() => {
     const mq = matchMedia("(prefers-color-scheme: dark)");
@@ -196,9 +196,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 className="langbtn"
                 lang={lang === "en" ? "ar" : "en"}
                 onClick={() => {
-                  const next = lang === "en" ? "ar" : "en";
-                  setLocale(next);
-                  void persistLang(next);
+                  void switchLang();
                 }}
               >
                 {lang === "en" ? "عربي" : "English"}

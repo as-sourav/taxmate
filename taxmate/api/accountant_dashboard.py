@@ -29,6 +29,7 @@ from taxmate.api.owner_dashboard import AGE_BUCKETS, _filing_row, age_bucket
 from taxmate.api.resource import assert_company_read, require_login
 from taxmate.setup.spa_roles import require_spa_role
 from taxmate.utils.company import get_default_company
+from taxmate.utils.localize import ledger_label
 
 _VAT_LOG = "UAE VAT 201 Filing Log"
 _CT_LOG = "UAE CT Filing Log"
@@ -928,7 +929,7 @@ class _Ctx:
 			out.append(
 				{
 					"account": a.name,
-					"label": a.account_name,
+					"label": ledger_label(a.account_name),
 					"type": a.account_type,
 					"currency": a.account_currency,
 					"mask": number[-4:] if number else "",

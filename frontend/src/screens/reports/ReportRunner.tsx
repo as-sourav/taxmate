@@ -25,6 +25,7 @@ import { useSession } from "../../lib/session";
 import { useDoc } from "../../lib/resource";
 import { useListParams } from "../../lib/list";
 import { money, toIsoDate } from "../../lib/format";
+import { useLang } from "../../lib/i18n";
 import { useIsPhone } from "../../lib/useMedia";
 import { t } from "../../i18n/strings";
 import { Empty, ErrorBox, Field, Loading, PageHead } from "../../components/ui";
@@ -35,7 +36,7 @@ import "./reports.css";
 
 type Col = ReportCol;
 type Row = Record<string, unknown>;
-type Payload = { result?: Row[]; columns?: Col[] };
+type Payload = { result?: Row[]; columns?: Col[]; report_label?: string };
 type Fy = { year_start_date?: string; year_end_date?: string };
 type Chip = "month" | "quarter" | "ytd" | "fy";
 
@@ -76,8 +77,33 @@ function parseFormattedMoney(s: string): number | null {
  * UAE VAT 201 (and similar) return `frappe.format` strings; prefer `raw_*`
  * when present, else parse the decorated string.
  */
+
+/** ERPNext wraps total lines in quotes, which break in RTL. */
+function unquote(s: string): string {
+  const t = s.trim();
+  if (t.length >= 2 && t.startsWith("'") && t.endsWith("'")) return t.slice(1, -1);
+  return t;
+}
+
+/**
+ * `account` stays the document id (`Revenue - XSm`) so a row can still
+ * open General Ledger. `account_label` is that id's translated heading.
+ * `acc_name` is the Account Name column. `account_name` can be
+ * `1000 - Revenue`, so it is not used as the visible name.
+ */
+function accountCell(row: Row, field: string): string | null {
+  if (field === "acc_name") {
+    return typeof row.acc_name === "string" && row.acc_name.trim() ? unquote(row.acc_name) : null;
+  }
+  if (field !== "account") return null;
+  if (typeof row.account_label === "string" && row.account_label.trim()) return unquote(row.account_label);
+  return typeof row.account === "string" && row.account.trim() ? unquote(row.account) : null;
+}
+
 function cell(row: Row, col: Col): string {
   const field = col.fieldname || "";
+  const named = accountCell(row, field);
+  if (named != null && named !== "") return named;
   const v = row[field];
   if (v == null || v === "") return "—";
   if (typeof v === "number") return isMoney(col) ? money(v) : String(v);
@@ -148,6 +174,7 @@ export default function ReportRunner() {
   const name = decodeURIComponent(report);
   const nav = useNavigate();
   const session = useSession();
+  const { lang } = useLang();
   const phone = useIsPhone();
   const { get, set, setMany } = useListParams(20);
   const today = session.today || toIsoDate(new Date());
@@ -208,7 +235,7 @@ export default function ReportRunner() {
   const run = useFrappeGetCall<{ message: Payload }>(
     METHOD.runReport,
     { report_name: name, filters },
-    paused ? null : `rpt-${name}-${JSON.stringify(filters)}`,
+    paused ? null : `rpt-${lang}-${name}-${JSON.stringify(filters)}`,
   );
 
   const columns = useMemo(
@@ -343,7 +370,7 @@ export default function ReportRunner() {
     <div className="rpt-run">
       <PageHead
         eyebrow={<button type="button" className="btn quiet" onClick={() => nav("/reports")}>{t("rpt.title")}</button>}
-        title={name}
+        title={run.data?.message?.report_label || name}
         sub={phone ? undefined : (blurbKey ? t(blurbKey) : t("rpt.runSub"))}
         stickyActions={false}
         actions={
