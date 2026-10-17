@@ -112,5 +112,54 @@ class TestPipelineVersion(unittest.TestCase):
 		self.assertGreaterEqual(PIPELINE_VERSION, 1)
 
 
+class TestJsonValueForSetValue(unittest.TestCase):
+	"""Regression: raw dict into set_value on JSON columns → MariaDB 1064."""
+
+	def test_dict_is_json_encoded(self):
+		import json
+
+		from taxmate.idp.jobs import _json_value
+
+		out = _json_value({"uploaded": 141.1})
+		self.assertIsInstance(out, str)
+		self.assertEqual(json.loads(out), {"uploaded": 141.1})
+		# Python dict repr would use single quotes and break SQL.
+		self.assertNotIn("'", out)
+
+	def test_none_and_str(self):
+		from taxmate.idp.jobs import _json_value
+
+		self.assertEqual(_json_value(None), "{}")
+		self.assertEqual(_json_value('{"a": 1}'), '{"a": 1}')
+
+
+class TestGetScanFailedDetail(unittest.TestCase):
+	def test_failed_includes_error_message_detail(self):
+		import taxmate.api.idp_desk as desk
+		from taxmate.idp import scan as scan_mod
+
+		doc = MagicMock()
+		doc.status = scan_mod.FAILED
+		doc.error_key = "idp.readFailed"
+		doc.error_message = "(1064, \"syntax error near 'uploaded': 1}\")"
+		doc.name = "IDPLOG-FAIL"
+		doc.file_url = "/private/files/x.png"
+		doc.target_doctype = "Purchase Invoice"
+
+		with (
+			patch.object(desk, "require_login"),
+			patch("taxmate.idp.scan.assert_scan_access", return_value=doc),
+			patch(
+				"taxmate.idp.scan.scan_payload",
+				return_value={"ok": True, "status": scan_mod.FAILED, "scan_id": "IDPLOG-FAIL"},
+			),
+		):
+			out = desk.get_scan("IDPLOG-FAIL", "Purchase Invoice")
+
+		self.assertFalse(out.get("ok"))
+		self.assertEqual(out.get("error_key"), "idp.readFailed")
+		self.assertIn("1064", out.get("detail") or "")
+
+
 if __name__ == "__main__":
 	unittest.main()

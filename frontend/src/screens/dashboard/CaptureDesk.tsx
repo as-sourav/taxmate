@@ -298,6 +298,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         return {
           ok: false,
           error_key: String(status.error_key || (status.status === "Cancelled" ? "cancelled" : "idp.readFailed")),
+          detail: typeof status.detail === "string" ? status.detail : null,
           can_save: false,
           scan_id: id,
         };
@@ -306,6 +307,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         return {
           ok: false,
           error_key: String(status.error_key),
+          detail: typeof status.detail === "string" ? status.detail : null,
           can_save: false,
           scan_id: id,
         };
