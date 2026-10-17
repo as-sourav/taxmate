@@ -16,3 +16,19 @@ Priority when skills conflict: task ground rules > TaxMate tokens / phone CSS > 
 | ui-ux-pro-max | `~/.cursor/skills/ui-ux-pro-max/SKILL.md` | Touch targets; one-handed reach; reuse existing bottom sheets; safe-area |
 | avoid-ai-slop | **not found** | Closest: task §6 (no decorative cards/gradients) + `frontend-design` + `~/.cursor/skills/avoid-ai-writing/SKILL.md` (writing only) |
 | no-ai-slop | `~/.cursor/skills/no-ai-slop/SKILL.md` | Writing skill; for UI apply task “no decorative cards / gradients / filler” |
+
+## IDP scan hardening (2026-10-17)
+
+Priority on conflict: `docs/idp-scan-hardening-prompt.md` > TaxMate tokens / existing CSS > Frappe skills > a11y > aesthetics.
+
+| Skill | Applied where |
+|---|---|
+| frappe-api-development | `taxmate.api.idp_desk` whitelist (`run`/`get_scan`/`cancel_scan`/`save`); catalog entries; no permission bypass |
+| frappe-doctype-development | `IDP Document Log` Scan fields (`file_sha256`, `pipeline_version`, …) in `apps/idp` |
+| frappe-enterprise-patterns | Background enqueue on `long` queue; realtime doc room; cancel between stages |
+| frappe-testing | `test_idp_desk` / IDP eval + preprocess / validator table tests |
+| vercel-react-best-practices / composition-patterns | `useScan` state machine; no boolean-prop sprawl on CaptureDesk split |
+| web-design-guidelines / ui-ux-pro-max | 44px targets; permission-denial copy; retake prompt; live regions on progress |
+| frontend-design | Keep TaxMate look; no generic redesign of CaptureDesk |
+| no-ai-slop | Copy, comments, eval baseline docs, commit messages |
+| gstack | Plan eng-review locked; `/cso` `/review` `/qa` `/benchmark` on later PRs |

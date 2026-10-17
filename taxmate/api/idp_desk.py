@@ -35,6 +35,8 @@ SURFACE_METHOD = "taxmate.api.idp_desk.get_surface"
 UPLOAD_METHOD = "taxmate.api.idp_desk.upload"
 RUN_METHOD = "taxmate.api.idp_desk.run"
 SAVE_METHOD = "taxmate.api.idp_desk.save"
+GET_SCAN_METHOD = "taxmate.api.idp_desk.get_scan"
+CANCEL_SCAN_METHOD = "taxmate.api.idp_desk.cancel_scan"
 
 
 @frappe.whitelist()
@@ -320,16 +322,11 @@ def _run(
 		return _search(planned)
 	if action == "delete":
 		return _preview_delete(planned)
-	extracted = _read(file_url or "", planned["doctype"], use_model=action == "create")
+	if action == "create":
+		return _run_create(planned, file_url or "")
+	extracted = _read(file_url or "", planned["doctype"], use_model=False)
 	if extracted.get("error_key"):
 		return {"ok": False, "error_key": extracted["error_key"]}
-	if action == "create":
-		review = review_from_extract(extracted, route=planned.get("route"))
-		review["file_url"] = file_url
-		review["save_key"] = planned.get("save_key")
-		review["used_llm"] = bool(extracted.get("used_llm"))
-		_prefill_writes(review)
-		return review
 	if action == "compare":
 		return _compare(planned, extracted, file_url)
 	if action == "match":
@@ -348,19 +345,73 @@ def save(
 	fills: str | None = None,
 	submit: str | None = None,
 	proposals: str | None = None,
+	scan_id: str | None = None,
 ) -> dict:
-	"""Apply the job the clerk confirmed. Submit runs only when they ask."""
+	"""Apply the job the clerk confirmed. Submit runs only when they ask.
+
+	Create requires ``scan_id`` from a Ready Scan — never re-runs OCR/LLM.
+	"""
 	require_login()
 	planned = _plan(action, target_doctype, file_url, query)
 	if not planned.get("ok"):
 		return planned
 	if action == "create":
-		return _save_create(planned, file_url or "", fills=fills, submit=submit, proposals=proposals)
+		return _save_create(
+			planned,
+			file_url or "",
+			fills=fills,
+			submit=submit,
+			proposals=proposals,
+			scan_id=scan_id,
+		)
 	if action == "update":
 		return _save_update(planned, file_url or "")
 	if action == "delete":
 		return _save_delete(planned)
 	return {"ok": False, "error_key": "idp.pending"}
+
+
+@frappe.whitelist()
+def get_scan(scan_id: str, target_doctype: str | None = None) -> dict:
+	"""Poll Scan status / frozen payload. Catalogued for SPA progress."""
+	require_login()
+	from taxmate.idp import scan as scan_mod
+	from taxmate.idp.scan import assert_scan_access, scan_payload
+
+	try:
+		doc = assert_scan_access(scan_id)
+	except frappe.DoesNotExistError:
+		return {"ok": False, "error_key": "idp.missing"}
+	except frappe.PermissionError:
+		return {"ok": False, "error_key": "idp.denied"}
+	payload = scan_payload(doc)
+	if doc.status in scan_mod.REVIEW_READY:
+		planned = _plan("create", target_doctype or doc.target_doctype, doc.file_url, None)
+		if planned.get("ok"):
+			review = _review_from_scan(scan_id, planned, doc.file_url)
+			payload["review"] = review
+	elif doc.status == scan_mod.FAILED:
+		payload["ok"] = False
+		payload["error_key"] = doc.error_key or "idp.readFailed"
+	return payload
+
+
+@frappe.whitelist()
+def cancel_scan(scan_id: str) -> dict:
+	"""Request cancel; worker checks between stages (PR3). Sync path marks Cancelled."""
+	require_login()
+	from taxmate.idp import scan as scan_mod
+
+	try:
+		doc = scan_mod.assert_scan_access(scan_id)
+	except frappe.DoesNotExistError:
+		return {"ok": False, "error_key": "idp.missing"}
+	except frappe.PermissionError:
+		return {"ok": False, "error_key": "idp.denied"}
+	if doc.status in (*scan_mod.REVIEW_READY, scan_mod.FAILED, scan_mod.CANCELLED, "Created", "Saved", "Saving"):
+		return {"ok": True, "scan_id": scan_id, "status": doc.status}
+	scan_mod.mark_scan(scan_id, cancel_requested=1, status=scan_mod.CANCELLED, error_key="cancelled")
+	return {"ok": True, "scan_id": scan_id, "status": scan_mod.CANCELLED}
 
 
 def _search(planned: dict) -> dict:
@@ -489,6 +540,86 @@ def _preview_delete(planned: dict) -> dict:
 	}
 
 
+def _review_from_scan(scan_id: str, planned: dict, file_url: str | None = None) -> dict:
+	from taxmate.idp import scan as scan_mod
+
+	doc = scan_mod.assert_scan_access(scan_id)
+	extracted = scan_mod.frozen_extracted(doc)
+	review = review_from_extract(extracted, route=planned.get("route"))
+	review["file_url"] = file_url or doc.file_url
+	review["scan_id"] = scan_id
+	review["save_key"] = planned.get("save_key")
+	review["used_llm"] = bool(extracted.get("used_llm"))
+	review["status"] = doc.status
+	_prefill_writes(review)
+	return review
+
+
+def _run_create(planned: dict, file_url: str) -> dict:
+	"""Enqueue OCR-once Scan; return scan_id immediately for polling."""
+	from taxmate.idp import scan as scan_mod
+	from taxmate.idp.jobs import enqueue_scan
+
+	if not file_url:
+		return {"ok": False, "error_key": "idp.file"}
+	digest = scan_mod.file_sha256(file_url)
+	if digest:
+		existing = scan_mod.find_ready_scan(
+			file_sha256_hex=digest, target_doctype=planned["doctype"]
+		)
+		if existing:
+			return _review_from_scan(existing, planned, file_url)
+
+	try:
+		scan_id = scan_mod.persist_scan(
+			file_url=file_url,
+			target_doctype=planned["doctype"],
+			extracted={},
+			file_sha256_hex=digest,
+			status=scan_mod.EXTRACTING,
+		)
+	except Exception:
+		frappe.log_error(title="TaxMate IDP persist scan failed", message=frappe.get_traceback())
+		return {"ok": False, "error_key": "idp.readFailed", "detail": "Could not create Scan"}
+
+	try:
+		enqueue_scan(
+			scan_id=scan_id,
+			file_url=file_url,
+			target_doctype=planned["doctype"],
+			user=frappe.session.user,
+		)
+	except Exception:
+		frappe.log_error(title="TaxMate IDP enqueue failed", message=frappe.get_traceback())
+		# Inline OCR-once so the clerk is not stuck without a worker.
+		from taxmate.idp.pipeline import read_once
+
+		extracted = read_once(file_url, planned["doctype"], use_model=True)
+		if extracted.get("error_key"):
+			scan_mod.mark_scan(
+				scan_id, status=scan_mod.FAILED, error_key=extracted["error_key"]
+			)
+			return {"ok": False, "error_key": extracted["error_key"], "scan_id": scan_id}
+		doc = frappe.get_doc(scan_mod.SCAN_DOCTYPE, scan_id)
+		doc.status = scan_mod.REVIEW
+		doc.extraction_data = extracted
+		doc.ocr_text = (extracted.get("ocr_text") or "")[:200000]
+		doc.path_taken = "hybrid" if extracted.get("used_llm") else "rule"
+		doc.field_confidence_json = extracted.get("field_confidence") or {}
+		doc.save(ignore_permissions=False)
+		return _review_from_scan(scan_id, planned, file_url)
+
+	return {
+		"ok": True,
+		"step": "processing",
+		"scan_id": scan_id,
+		"file_url": file_url,
+		"status": scan_mod.EXTRACTING,
+		"can_save": False,
+		"save_key": planned.get("save_key"),
+	}
+
+
 def _save_create(
 	planned: dict,
 	file_url: str,
@@ -496,7 +627,9 @@ def _save_create(
 	fills: str | None,
 	submit: str | None,
 	proposals: str | None = None,
+	scan_id: str | None = None,
 ) -> dict:
+	from taxmate.idp import scan as scan_mod
 	from taxmate.idp.masters import (
 		apply_created_links,
 		build_proposals,
@@ -508,9 +641,25 @@ def _save_create(
 		split_missing,
 	)
 
-	extracted = _read(file_url, planned["doctype"], use_model=True)
-	if extracted.get("error_key"):
-		return {"ok": False, "error_key": extracted["error_key"]}
+	if not scan_id:
+		return {"ok": False, "error_key": "idp.missing", "detail": "scan_id required"}
+	try:
+		scan_doc = scan_mod.assert_scan_access(scan_id)
+	except frappe.DoesNotExistError:
+		return {"ok": False, "error_key": "idp.missing"}
+	except frappe.PermissionError:
+		return {"ok": False, "error_key": "idp.denied"}
+	if scan_doc.status == scan_mod.CANCELLED or scan_doc.cancel_requested:
+		return {"ok": False, "error_key": "cancelled"}
+	if scan_doc.status == scan_mod.FAILED:
+		return {"ok": False, "error_key": scan_doc.error_key or "idp.readFailed"}
+	if scan_doc.status not in scan_mod.REVIEW_READY:
+		return {"ok": False, "error_key": "idp.pending"}
+	extracted = scan_mod.frozen_extracted(scan_doc)
+	if not extracted or extracted.get("error_key"):
+		return {"ok": False, "error_key": (extracted or {}).get("error_key") or "idp.readFailed"}
+	# Prefer Scan file_url when client omitted it.
+	file_url = file_url or scan_doc.file_url or ""
 	release_currency_company(extracted)
 	release_address_links(extracted)
 	_creatable, blocked = split_missing((extracted.get("validation") or {}).get("missing_masters"))
@@ -572,6 +721,16 @@ def _save_create(
 		return _tool_error(result)
 	name = (result.data or {}).get("name")
 	route = planned.get("route")
+	if scan_id and name:
+		try:
+			scan_mod.mark_scan(
+				scan_id,
+				status="Created",  # IDP Document Log audit status
+				created_doctype=instructions["doctype"],
+				created_document=name,
+			)
+		except Exception:
+			frappe.log_error(title="TaxMate IDP scan link failed", message=frappe.get_traceback())
 	payload = {
 		"ok": True,
 		"step": "saved",
@@ -579,6 +738,7 @@ def _save_create(
 		"name": name,
 		"route": f"{route}/{name}" if route and name else None,
 		"docstatus": (result.data or {}).get("docstatus"),
+		"scan_id": scan_id,
 	}
 	if not submit_requested(submit) or not name:
 		return payload
@@ -648,46 +808,16 @@ def _fills(raw: str | None) -> dict:
 
 
 def _bind_known_items(extracted: dict) -> None:
-	"""Match a printed item name to an item that already exists. Then re-check the draft."""
-	if not extracted.get("success"):
-		return
-	data = extracted.get("extracted_data") or {}
-	items = data.get("items") or []
+	from taxmate.idp.post_map import bind_known_items
 
-	def lookup(name: str) -> str | None:
-		return frappe.db.get_value("Item", {"item_name": name}, "item_code")
-
-	attach_item_codes(items, lookup)
-	_refresh_validation(extracted)
+	bind_known_items(extracted)
 
 
 def _refresh_validation(extracted: dict) -> None:
-	from idp.core.config import get_default_company
-	from idp.mappers.base import MappedDocument
-	from idp.validators import validate_business_rules, validate_schema
+	from taxmate.idp.post_map import refresh_validation
 
-	data = extracted.get("extracted_data") or {}
-	mapped = MappedDocument(
-		doctype=str(data.get("doctype") or ""),
-		header=dict(data.get("header") or {}),
-		items=list(data.get("items") or []),
-	)
-	company = get_default_company()
-	schema_result = validate_schema(mapped, company or "")
-	biz_warnings = validate_business_rules(mapped, company or "")
-	extracted["validation"] = {
-		"is_valid": schema_result.is_valid,
-		"errors": [
-			{"field": row.field, "message": row.message, "severity": row.severity}
-			for row in schema_result.errors
-		],
-		"warnings": [
-			{"field": row.field, "message": row.message, "severity": row.severity}
-			for row in schema_result.warnings
-		]
-		+ [{"field": "", "message": row, "severity": "warning"} for row in biz_warnings],
-		"missing_masters": schema_result.missing_masters,
-	}
+	refresh_validation(extracted)
+
 
 
 def _prefill_writes(review: dict) -> None:

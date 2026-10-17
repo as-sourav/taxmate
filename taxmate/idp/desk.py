@@ -812,6 +812,7 @@ def review_from_extract(extracted: dict[str, Any], *, route: str | None) -> dict
 		"gaps": gaps,
 		"writes": writes,
 		"proposals": proposals,
+		"field_confidence": extracted.get("field_confidence") or {},
 		"stage_log": stage_log,
 		"can_save": can_save,
 		"can_submit": can_save and not proposals,

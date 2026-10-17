@@ -1,7 +1,12 @@
 /**
  * Persist SPA language/theme onto Frappe User (language + desk_theme).
  * SessionProvider applies User → SPA on load; toggles call persist* after local apply.
+ *
+ * Callers: useSwitchLang, AppShell theme toggle, session applySessionPrefs.
  */
+import { apiFetch } from "../mobile/http";
+import { isNative, MOBILE_BUILD } from "../mobile/platform";
+import { authHeader } from "../mobile/session";
 import { METHOD } from "./frappe";
 import { getLang, setLang, type Lang } from "./i18n";
 import { appearance, getTheme, setTheme, type Theme } from "./theme";
@@ -20,7 +25,7 @@ function csrf(): string {
 
 async function postPrefs(body: Record<string, string>): Promise<UiPrefsPayload | null> {
   try {
-    const res = await fetch(`/api/method/${METHOD.updateUiPreferences}`, {
+    const res = await apiFetch(`/api/method/${METHOD.updateUiPreferences}`, {
       method: "POST",
       credentials: "include",
       headers: {
@@ -59,8 +64,15 @@ export function applySessionPrefs(prefs: {
   return out;
 }
 
-/** Save User.language first. Local strings flip only after Frappe accepts it. */
+/**
+ * Save User.language first. Local strings flip only after Frappe accepts it.
+ * Before sign-in the phone has no device token, so chrome switches locally only.
+ */
 export async function persistLang(lang: Lang): Promise<boolean> {
+  if (MOBILE_BUILD && isNative() && !authHeader()) {
+    setLang(lang);
+    return true;
+  }
   const saved = await postPrefs({ language: lang });
   if (!saved) return false;
   setLang(lang);

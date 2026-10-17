@@ -100,6 +100,11 @@ website_route_rules = [
 after_install = "taxmate.install.after_install"
 after_migrate = "taxmate.install.after_migrate"
 
+# IDP Scan extension points (apps/idp reads these via frappe.get_hooks)
+idp_after_extract = ["taxmate.idp.hooks_idp.idp_after_extract"]
+idp_before_make_draft = ["taxmate.idp.hooks_idp.idp_before_make_draft"]
+
+
 # Uninstallation
 # ------------
 
