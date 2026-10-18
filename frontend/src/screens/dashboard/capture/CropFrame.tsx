@@ -1,7 +1,9 @@
 /**
  * Crop the captured photo before OCR prep.
- * Callers: CaptureDesk after Take photo / Choose image.
+ * Callers: CaptureDesk after Take photo / Choose image (CaptureDesk.tsx ~550).
+ * Layout: stage fills the panel; actions stay pinned (no scroll hunt).
  * Touch: drag the frame or corners (≥44px hit). Keyboard: Escape cancels.
+ * User: "Rebuilt the complete UI/UX for this feature… classy, modern and professional."
  */
 
 import {
@@ -162,8 +164,11 @@ export function CropFrame({ src, onConfirm, onCancel, busy }: Props) {
 
   return (
     <div className="idp-crop" role="group" aria-label={t("idp.crop.title")}>
-      <p className="idp-kicker">{t("idp.crop.title")}</p>
-      <p className="idp-hint">{t("idp.crop.hint")}</p>
+      <div className="idp-crop-banner">
+        <p className="idp-crop-banner-title">{t("idp.crop.title")}</p>
+        <p className="idp-crop-banner-hint">{t("idp.crop.hint")}</p>
+      </div>
+
       <div
         ref={stageRef}
         className="idp-crop-stage"
@@ -196,25 +201,21 @@ export function CropFrame({ src, onConfirm, onCancel, busy }: Props) {
           ))}
         </div>
       </div>
+
       <div className="idp-crop-actions">
-        <button type="button" className="btn ghost sm" disabled={busy} onClick={onCancel}>
-          {t("idp.crop.retake")}
-        </button>
         <button
           type="button"
-          className="btn ghost sm"
-          disabled={busy}
-          onClick={() => onConfirm(null)}
-        >
-          {t("idp.crop.full")}
-        </button>
-        <button
-          type="button"
-          className="btn sm"
+          className="btn idp-crop-primary"
           disabled={busy}
           onClick={() => onConfirm(crop)}
         >
-          {t("idp.crop.use")}
+          {busy ? t("idp.working") : t("idp.crop.use")}
+        </button>
+        <button type="button" className="btn ghost" disabled={busy} onClick={() => onConfirm(null)}>
+          {t("idp.crop.full")}
+        </button>
+        <button type="button" className="btn ghost" disabled={busy} onClick={onCancel}>
+          {t("idp.crop.retake")}
         </button>
       </div>
     </div>
