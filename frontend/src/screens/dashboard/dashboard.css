@@ -150,8 +150,8 @@ div.od-cmp-i:hover{background:transparent}
    Backdrop does not dismiss. Crop: stage fills height; actions pinned.
    User: "Rebuilt the complete UI/UX… classy, modern and professional." */
 .idp-back{
-  position:fixed; inset:0; z-index:80; display:flex; align-items:flex-end; justify-content:center;
-  /* Keep sheet under the status bar / notch; feet own the bottom inset. */
+  /* Portaled to document.body — above MobileNav (60) / More sheet (71). */
+  position:fixed; inset:0; z-index:100; display:flex; align-items:flex-end; justify-content:center;
   padding:env(safe-area-inset-top, 0px) 0 0;
   background:color-mix(in srgb, var(--text) 40%, transparent);
   box-sizing:border-box;
@@ -163,10 +163,13 @@ div.od-cmp-i:hover{background:transparent}
   }
 }
 .idp-panel{
+  --idp-sheet-h: calc(100dvh - env(safe-area-inset-top, 0px));
+  --idp-sheet-h: calc(100svh - env(safe-area-inset-top, 0px));
   width:min(440px, 100%);
-  /* Never taller than the visible area below the top safe inset. */
-  max-height:calc(100dvh - env(safe-area-inset-top, 0px));
-  max-height:calc(100svh - env(safe-area-inset-top, 0px));
+  /* Definite height so .idp-body can flex-shrink and scroll (max-height alone cannot). */
+  height:var(--idp-sheet-h);
+  max-height:var(--idp-sheet-h);
+  min-height:0;
   overflow:hidden;
   background:var(--surface); color:var(--text); border:1px solid var(--border);
   border-radius:var(--r) var(--r) 0 0; padding:0;
@@ -176,22 +179,17 @@ div.od-cmp-i:hover{background:transparent}
 }
 @media (min-width:720px){
   .idp-panel{
+    --idp-sheet-h: min(86vh, 720px);
     border-radius:var(--r);
     box-shadow:0 16px 48px rgba(15,23,42,.16);
-    max-height:min(86vh, 720px);
   }
 }
 .idp-panel--crop,
 .idp-panel--review,
 .idp-panel--capture{
-  /* Prefer filling the sheet so sticky feet stay on-screen. */
-  height:auto;
-  max-height:calc(100dvh - env(safe-area-inset-top, 0px));
-  max-height:calc(100svh - env(safe-area-inset-top, 0px));
-}
-.idp-panel--crop{
-  height:calc(100dvh - env(safe-area-inset-top, 0px));
-  height:calc(100svh - env(safe-area-inset-top, 0px));
+  height:var(--idp-sheet-h);
+  max-height:var(--idp-sheet-h);
+  min-height:0;
 }
 .idp-panel.idp-busy{cursor:progress}
 @media (max-width:900px){
@@ -243,19 +241,20 @@ div.od-cmp-i:hover{background:transparent}
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%;
 }
 .idp-body{
-  flex:1 1 auto; min-height:0; overflow:auto; -webkit-overflow-scrolling:touch;
+  /* flex-basis 0 forces shrink inside a definite-height sheet. */
+  flex:1 1 0; min-height:0; overflow-x:hidden; overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
   overscroll-behavior:contain;
+  touch-action:pan-y;
   padding:12px 18px 16px;
-  /* Leave room to scroll the last field above the sticky foot / keyboard. */
   scroll-padding-bottom:120px;
 }
 .idp-body--crop{
   overflow:hidden; display:flex; flex-direction:column; padding:0; min-height:0;
-  scroll-padding-bottom:0;
+  scroll-padding-bottom:0; touch-action:none;
 }
 .idp-body--foot{
-  /* Optical gap so the last card is not flush under the foot divider. */
-  padding-bottom:20px;
+  padding-bottom:24px;
 }
 .idp-foot{
   flex:none; flex-shrink:0;
@@ -317,7 +316,13 @@ div.od-cmp-i:hover{background:transparent}
 @media (max-width:360px){
   .idp-sources{grid-template-columns:1fr}
 }
-.idp-sources .idp-drop{margin:0; min-height:112px; padding:16px 12px}
+.idp-sources .idp-drop{margin:0; min-height:100px; padding:14px 12px}
+@media (max-height:700px){
+  .idp-sources .idp-drop{min-height:88px; padding:12px 10px}
+  .idp-form{gap:14px}
+  .idp-head{padding:12px 16px 6px}
+  .idp-steps{padding-bottom:8px}
+}
 .idp-picked{
   display:flex; align-items:baseline; gap:8px; margin:0;
   padding:10px 12px; border-radius:var(--r-sm);
