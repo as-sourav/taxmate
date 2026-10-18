@@ -547,14 +547,14 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         <div className="idp-head">
           <div className="idp-head-text">
             <h2 id={titleId}>{titleText}</h2>
-            {!cropping ? <p className="idp-sub">{t("idp.sub")}</p> : null}
+            {capturing ? <p className="idp-sub">{t("idp.sub")}</p> : null}
           </div>
           <button ref={closeRef} type="button" className="btn ghost sm" onClick={requestClose}>
             {busy ? t("idp.cancel") : t("idp.close")}
           </button>
         </div>
 
-        {!cropping ? (
+        {!cropping && !review ? (
           <ScanSteps current={scanStep} skipFrame={Boolean(file && isPdfFile(file))} />
         ) : null}
 
@@ -696,26 +696,6 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
                 )}
               </section>
 
-              {!file ? <p className="idp-hint idp-hint--guide">{t("idp.guide")}</p> : null}
-            </div>
-          ) : null}
-
-          {review && !busy ? (
-            <div className="idp-again-row">
-              <button
-                type="button"
-                className="btn ghost sm"
-                onClick={() => {
-                  setReview(null);
-                  setProposals([]);
-                  setWrites([]);
-                  setFile(null);
-                  setFileUrl(null);
-                  clearDraft();
-                }}
-              >
-                {t("idp.again")}
-              </button>
             </div>
           ) : null}
 
@@ -732,6 +712,15 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
               review={review}
               writes={writes}
               proposals={proposals}
+              busy={busy}
+              onAgain={() => {
+                setReview(null);
+                setProposals([]);
+                setWrites([]);
+                setFile(null);
+                setFileUrl(null);
+                clearDraft();
+              }}
               onWrite={(field, value) =>
                 setWrites((rows) => rows.map((row) => (row.field === field ? { ...row, value } : row)))
               }
@@ -743,9 +732,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
 
         {showReadFoot ? (
           <div className="idp-foot idp-foot--capture">
-            <p className="idp-foot-hint">
-              {!target ? t("idp.needType") : t("idp.readyRead")}
-            </p>
+            {!target ? <p className="idp-foot-hint">{t("idp.needType")}</p> : null}
             <button
               type="button"
               className="btn idp-run"
@@ -759,18 +746,17 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
 
         {showReviewFoot && review ? (
           <div className="idp-foot">
-            {review.error_key && !review.ok ? (
+            {review.error_key && !review.ok && scanHasContent(review, proposals) ? (
               <p className="idp-err" role="alert">
                 {formatScanError(review)}
               </p>
             ) : null}
-            {proposals.length > 0 && !(review.error_key && !review.ok) ? (
-              <p className="idp-hint">{t("idp.propose.onSave")}</p>
-            ) : null}
             {!canSave && review.detail && review.ok !== false ? (
-              <p className="idp-hint">{review.detail}</p>
+              <p className="idp-foot-hint">{review.detail}</p>
             ) : null}
-            {blockHint && !canSave && !review.detail ? <p className="idp-hint">{t(blockHint)}</p> : null}
+            {blockHint && !canSave && !review.detail ? (
+              <p className="idp-foot-hint">{t(blockHint)}</p>
+            ) : null}
             <div className="idp-jobs">
               <button
                 type="button"
@@ -821,6 +807,8 @@ function ReviewBlock({
   review,
   writes,
   proposals,
+  busy,
+  onAgain,
   onWrite,
   onProposal,
   onOpen,
@@ -828,102 +816,141 @@ function ReviewBlock({
   review: Review;
   writes: Write[];
   proposals: Proposal[];
+  busy: boolean;
+  onAgain: () => void;
   onWrite: (field: string, value: string) => void;
   onProposal: (rows: Proposal[] | ((prev: Proposal[]) => Proposal[])) => void;
   onOpen: (route: string) => void;
 }) {
+  const hasContent = scanHasContent(review, proposals);
+  const done = review.step === "saved" || review.step === "submitted";
+
   return (
-    <div className="idp-job" role="status" aria-live="polite">
-      {review.error_key && !review.ok && !scanHasContent(review, proposals) ? (
-        <p className="idp-err" role="alert">
+    <div className="idp-review" role="status" aria-live="polite">
+      <div className="idp-review-toolbar">
+        {done ? (
+          <span className={`idp-badge${review.step === "submitted" ? " idp-badge--ok" : ""}`}>
+            {review.step === "submitted" ? t("idp.submittedNow") : t("idp.saved")}
+          </span>
+        ) : hasContent ? (
+          <span className="idp-badge">{t("idp.step.review")}</span>
+        ) : null}
+        {!busy ? (
+          <button type="button" className="idp-link" onClick={onAgain}>
+            {t("idp.again")}
+          </button>
+        ) : null}
+      </div>
+
+      {review.error_key && !review.ok && !hasContent ? (
+        <p className="idp-err idp-err--block" role="alert">
           {formatScanError(review)}
         </p>
       ) : null}
-      {review.step === "saved" ? <p>{t("idp.saved")}</p> : null}
-      {review.step === "submitted" ? <p>{t("idp.submittedNow")}</p> : null}
+
       {review.route && review.error_key && review.name ? (
-        <button type="button" className="btn ghost" onClick={() => onOpen(review.route as string)}>
+        <button type="button" className="btn ghost sm" onClick={() => onOpen(review.route as string)}>
           {review.name}
         </button>
       ) : null}
-      {review.used_llm ? <p className="idp-kicker">{t("idp.modelUsed")}</p> : null}
+
       {review.lines && review.lines.length > 0 ? (
-        <>
-          <p className="idp-kicker">{t("idp.readTitle")}</p>
-          <div className="idp-read">
+        <section className="idp-card" aria-label={t("idp.readTitle")}>
+          <header className="idp-card-head">
+            <h3 className="idp-card-title">{t("idp.readTitle")}</h3>
+          </header>
+          <dl className="idp-kv">
             {review.lines.map((line) => (
-              <div key={line.label_key}>
-                <span>{fieldLabel(line.label_key)}</span>
-                <b>{line.value}</b>
+              <div className="idp-kv-row" key={line.label_key}>
+                <dt>{fieldLabel(line.label_key)}</dt>
+                <dd>{line.value}</dd>
               </div>
             ))}
-          </div>
-        </>
+          </dl>
+        </section>
       ) : null}
+
       {review.items && review.items.length > 0 ? (
-        <ul className="idp-notes">
-          {review.items.map((item) => (
-            <li key={item.label}>{item.label}</li>
-          ))}
-        </ul>
+        <section className="idp-card" aria-label={t("idp.stage.items")}>
+          <header className="idp-card-head">
+            <h3 className="idp-card-title">{t("idp.stage.items")}</h3>
+            <span className="idp-card-meta">{review.items.length}</span>
+          </header>
+          <ul className="idp-line-items">
+            {review.items.map((item) => (
+              <li key={item.label}>{item.label}</li>
+            ))}
+          </ul>
+        </section>
       ) : null}
+
       {review.gaps && review.gaps.length > 0 ? (
-        <>
-          <p className="idp-kicker">{t("idp.still")}</p>
-          <ul className="idp-notes">
+        <section className="idp-callout idp-callout--warn" aria-label={t("idp.still")}>
+          <p className="idp-callout-title">{t("idp.still")}</p>
+          <ul className="idp-callout-list">
             {review.gaps.map((key) => (
               <li key={key}>{t(key)}</li>
             ))}
           </ul>
-        </>
+        </section>
       ) : null}
+
       {proposals.length > 0 ? (
-        <>
-          <p className="idp-kicker">{t("idp.propose.title")}</p>
-          {proposals.map((row) => (
-            <ProposalCard
-              key={row.key}
-              proposal={row}
-              onChange={(next) =>
-                onProposal((rows) => rows.map((item) => (item.key === next.key ? next : item)))
-              }
-            />
-          ))}
-        </>
+        <section className="idp-card" aria-label={t("idp.propose.title")}>
+          <header className="idp-card-head">
+            <h3 className="idp-card-title">{t("idp.propose.title")}</h3>
+          </header>
+          <div className="idp-propose-stack">
+            {proposals.map((row) => (
+              <ProposalCard
+                key={row.key}
+                proposal={row}
+                onChange={(next) =>
+                  onProposal((rows) => rows.map((item) => (item.key === next.key ? next : item)))
+                }
+              />
+            ))}
+          </div>
+        </section>
       ) : null}
+
       {review.step === "review" && writes.length > 0 ? (
-        <>
-          <p className="idp-kicker">{t("idp.write")}</p>
-          {writes.map((row) => {
-            const fieldId = `idp-write-${row.field}`;
-            return (
-              <label className="idp-file" key={row.field} htmlFor={fieldId}>
-                {fieldLabel(row.label_key)}
-                {row.options && row.options.length > 0 ? (
-                  <select
-                    id={fieldId}
-                    value={row.value}
-                    onChange={(event) => onWrite(row.field, event.target.value)}
-                  >
-                    <option value="" />
-                    {row.options.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    id={fieldId}
-                    type={row.field.endsWith("date") ? "date" : "text"}
-                    value={row.value}
-                    onChange={(event) => onWrite(row.field, event.target.value)}
-                  />
-                )}
-              </label>
-            );
-          })}
-        </>
+        <section className="idp-card" aria-label={t("idp.write")}>
+          <header className="idp-card-head">
+            <h3 className="idp-card-title">{t("idp.write")}</h3>
+          </header>
+          <div className="idp-fields">
+            {writes.map((row) => {
+              const fieldId = `idp-write-${row.field}`;
+              return (
+                <label className="idp-field" key={row.field} htmlFor={fieldId}>
+                  <span className="idp-field-label">{fieldLabel(row.label_key)}</span>
+                  {row.options && row.options.length > 0 ? (
+                    <select
+                      id={fieldId}
+                      value={row.value}
+                      onChange={(event) => onWrite(row.field, event.target.value)}
+                    >
+                      <option value="" />
+                      {row.options.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      id={fieldId}
+                      type={row.field.endsWith("date") ? "date" : "text"}
+                      value={row.value}
+                      onChange={(event) => onWrite(row.field, event.target.value)}
+                    />
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        </section>
       ) : null}
     </div>
   );
@@ -962,7 +989,7 @@ function ProposalCard({
   }
   return (
     <fieldset className="idp-propose">
-      <legend>{proposal.title}</legend>
+      <legend className="idp-propose-title">{proposal.title}</legend>
       <label className="idp-consent" htmlFor={consentId}>
         <input
           id={consentId}
@@ -970,44 +997,58 @@ function ProposalCard({
           checked={proposal.confirmed}
           onChange={(event) => onChange({ ...proposal, confirmed: event.target.checked })}
         />
-        {t(proposal.consent_label_key)}
+        <span>{t(proposal.consent_label_key)}</span>
       </label>
-      {[...proposal.required_fields, ...proposal.optional_fields].map((row) => {
-        const fieldId = `idp-prop-${proposal.key}-${row.field}`;
-        const required = proposal.required_fields.some((item) => item.field === row.field);
-        return (
-          <label className="idp-file" key={row.field} htmlFor={fieldId}>
-            <FieldLabel labelKey={row.label_key} required={required} />
-            {row.options && row.options.length > 0 ? (
-              <select
-                id={fieldId}
-                value={row.value}
-                required={required}
-                onChange={(event) =>
-                  patchField(required ? "required_fields" : "optional_fields", row.field, event.target.value)
-                }
-              >
-                <option value="" />
-                {row.options.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                id={fieldId}
-                type="text"
-                value={row.value}
-                required={required}
-                onChange={(event) =>
-                  patchField(required ? "required_fields" : "optional_fields", row.field, event.target.value)
-                }
-              />
-            )}
-          </label>
-        );
-      })}
+      {proposal.confirmed ? (
+        <div className="idp-fields">
+          {[...proposal.required_fields, ...proposal.optional_fields].map((row) => {
+            const fieldId = `idp-prop-${proposal.key}-${row.field}`;
+            const required = proposal.required_fields.some((item) => item.field === row.field);
+            return (
+              <label className="idp-field" key={row.field} htmlFor={fieldId}>
+                <span className="idp-field-label">
+                  <FieldLabel labelKey={row.label_key} required={required} />
+                </span>
+                {row.options && row.options.length > 0 ? (
+                  <select
+                    id={fieldId}
+                    value={row.value}
+                    required={required}
+                    onChange={(event) =>
+                      patchField(
+                        required ? "required_fields" : "optional_fields",
+                        row.field,
+                        event.target.value,
+                      )
+                    }
+                  >
+                    <option value="" />
+                    {row.options.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id={fieldId}
+                    type="text"
+                    value={row.value}
+                    required={required}
+                    onChange={(event) =>
+                      patchField(
+                        required ? "required_fields" : "optional_fields",
+                        row.field,
+                        event.target.value,
+                      )
+                    }
+                  />
+                )}
+              </label>
+            );
+          })}
+        </div>
+      ) : null}
     </fieldset>
   );
 }
