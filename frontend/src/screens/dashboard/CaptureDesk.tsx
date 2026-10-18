@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useId, useRef, useState, type ChangeEvent } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useFrappeGetCall } from "frappe-react-sdk";
 
@@ -114,14 +115,18 @@ export function CaptureDesk() {
           <path d="M3.2 6.2V3.4h2.8M14.8 6.2V3.4h-2.8M3.2 11.8v2.8h2.8M14.8 11.8v2.8h-2.8M2.8 9h12.4" />
         </svg>
       </button>
-      {open ? (
-        <CapturePanel
-          onClose={() => {
-            setOpen(false);
-            openRef.current?.focus();
-          }}
-        />
-      ) : null}
+      {/* Portal to body — topbar/sticky ancestors clip position:fixed and kill scroll. */}
+      {open
+        ? createPortal(
+            <CapturePanel
+              onClose={() => {
+                setOpen(false);
+                openRef.current?.focus();
+              }}
+            />,
+            document.body,
+          )
+        : null}
     </>
   );
 }
