@@ -78,11 +78,14 @@ taxmate/www/taxmate.html
 skills-lock.json
 tasks/
 
-# Local merge scratch — never ship in the app package
+# Local merge scratch / backups — never ship in the app package
 .mobile-merge-backup-*/
 .mobile-backup-*/
 .taxmate-backup-*/
+.backup-*/
+.local-uat-backup/
 _imports/
+.ruff_cache/
 
 # Agent working prompts — not part of the app
 docs/*-prompt.md
