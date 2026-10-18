@@ -60,6 +60,12 @@ uv.lock
 taxmate/public/frontend/
 taxmate/www/taxmate.html
 
+# Native / Capacitor build artifacts (debug APKs left in the working tree).
+# Callers: git status only — not imported by the app. User: "if unnecessary… gitignore… otherwise delete"
+*.apk
+*.aab
+*.ipa
+
 # Agent / IDE tooling — local only, not shipped in production packages.
 # Callers: git status / packaging (flit); no runtime importer.
 # Existing purpose: this .gitignore already ignored .agents/.claude/.cursor/skills|agents;
