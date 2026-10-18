@@ -22,6 +22,7 @@ import {
 import { cameraAvailable, takePhoto } from "./capture/nativeCamera";
 import { CropFrame } from "./capture/CropFrame";
 import { ScanProgress } from "./capture/ScanProgress";
+import { ScanSteps, type ScanStepId } from "./capture/ScanSteps";
 
 type Target = {
   doctype: string;
@@ -516,12 +517,27 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
           : null;
 
   const readyTargets = action?.targets.filter((row) => row.ready) ?? [];
+  const cropping = Boolean(action?.runnable && !review && draft);
+  const capturing = Boolean(action?.runnable && !review && !draft);
+  const showReviewFoot = Boolean(
+    review && (scanHasContent(review, proposals) || review.ok !== false),
+  );
+  const showReadFoot = Boolean(capturing && file && !busy);
+  const scanStep: ScanStepId = cropping
+    ? "frame"
+    : review || phase === "saving"
+      ? "review"
+      : phase === "uploading" || phase === "reading" || file
+        ? "read"
+        : "capture";
+  const panelMode = cropping ? "crop" : review ? "review" : "capture";
+  const titleText = cropping ? t("idp.crop.title") : review ? t("idp.step.review") : t("idp.title");
 
   return (
     <div className="idp-back" role="presentation">
       <div
         ref={panelRef}
-        className={`idp-panel${busy ? " idp-busy" : ""}`}
+        className={`idp-panel idp-panel--${panelMode}${busy ? " idp-busy" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -529,11 +545,18 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         aria-busy={busy}
       >
         <div className="idp-head">
-          <h2 id={titleId}>{t("idp.title")}</h2>
+          <div className="idp-head-text">
+            <h2 id={titleId}>{titleText}</h2>
+            {!cropping ? <p className="idp-sub">{t("idp.sub")}</p> : null}
+          </div>
           <button ref={closeRef} type="button" className="btn ghost sm" onClick={requestClose}>
             {busy ? t("idp.cancel") : t("idp.close")}
           </button>
         </div>
+
+        {!cropping ? (
+          <ScanSteps current={scanStep} skipFrame={Boolean(file && isPdfFile(file))} />
+        ) : null}
 
         {busy ? (
           <div className="idp-progress" aria-hidden="true">
@@ -541,13 +564,13 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
           </div>
         ) : null}
 
-        <div className="idp-body">
+        <div className={`idp-body${cropping ? " idp-body--crop" : ""}`}>
           {res.error ? <p className="idp-err">{readableError(res.error).join(" ")}</p> : null}
           {!surface && res.isLoading ? <p className="idp-hint">{t("idp.loading")}</p> : null}
           {surface && !action ? <p className="idp-hint">{t("idp.empty")}</p> : null}
           {action && !action.runnable ? <p className="idp-hint">{t(action.pending_key)}</p> : null}
 
-          {action?.runnable && !review && draft ? (
+          {cropping && draft ? (
             <CropFrame
               src={draft.url}
               busy={prepBusy}
@@ -562,97 +585,123 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
             />
           ) : null}
 
-          {action?.runnable && !review && !draft ? (
+          {capturing ? (
             <div className="idp-form">
-              <p className="idp-kicker">{t("idp.pick")}</p>
-              <div className="idp-targets" role="group" aria-label={t("idp.pick")}>
-                {readyTargets.map((row) => (
-                  <button
-                    key={row.doctype}
-                    type="button"
-                    className="btn ghost sm"
-                    aria-pressed={target === row.doctype}
-                    disabled={busy}
-                    onClick={() => setTarget(row.doctype)}
-                  >
-                    {t(row.label_key)}
-                  </button>
-                ))}
-              </div>
+              <section className="idp-section" aria-labelledby={`${titleId}-type`}>
+                <div className="idp-section-head">
+                  <span className="idp-section-num" aria-hidden="true">
+                    1
+                  </span>
+                  <h3 id={`${titleId}-type`} className="idp-section-title">
+                    {t("idp.pick")}
+                  </h3>
+                </div>
+                <div className="idp-targets" role="group" aria-label={t("idp.pick")}>
+                  {readyTargets.map((row) => (
+                    <button
+                      key={row.doctype}
+                      type="button"
+                      className="idp-chip"
+                      aria-pressed={target === row.doctype}
+                      disabled={busy}
+                      onClick={() => setTarget(row.doctype)}
+                    >
+                      {t(row.label_key)}
+                    </button>
+                  ))}
+                </div>
+              </section>
 
-              {showCamera ? (
-                <>
-                  <div
-                    className={`idp-sources${file ? " has-file" : ""}`}
-                    role="group"
-                    aria-label={t("idp.sources")}
-                  >
-                    {cameraAvailable() ? (
-                      <button
-                        type="button"
-                        className={`idp-drop${file ? " has-file" : ""}`}
-                        disabled={busy}
-                        onClick={() => void onTakePhoto()}
-                      >
-                        <span className="idp-drop-title">{t("idp.camera")}</span>
-                        <span className="idp-drop-hint">{t("idp.cameraHint")}</span>
-                      </button>
-                    ) : (
+              <section className="idp-section" aria-labelledby={`${titleId}-src`}>
+                <div className="idp-section-head">
+                  <span className="idp-section-num" aria-hidden="true">
+                    2
+                  </span>
+                  <h3 id={`${titleId}-src`} className="idp-section-title">
+                    {t("idp.sources")}
+                  </h3>
+                </div>
+
+                {showCamera ? (
+                  <>
+                    <div
+                      className={`idp-sources${file ? " has-file" : ""}`}
+                      role="group"
+                      aria-label={t("idp.sources")}
+                    >
+                      {cameraAvailable() ? (
+                        <button
+                          type="button"
+                          className={`idp-drop${file ? " has-file" : ""}`}
+                          disabled={busy}
+                          onClick={() => void onTakePhoto()}
+                        >
+                          <span className="idp-drop-icon" aria-hidden="true">
+                            <CameraIcon />
+                          </span>
+                          <span className="idp-drop-title">{t("idp.camera")}</span>
+                          <span className="idp-drop-hint">{t("idp.cameraHint")}</span>
+                        </button>
+                      ) : (
+                        <label className={`idp-drop${file ? " has-file" : ""}`}>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            disabled={busy}
+                            onChange={(e) => void onPickFile(e)}
+                          />
+                          <span className="idp-drop-icon" aria-hidden="true">
+                            <CameraIcon />
+                          </span>
+                          <span className="idp-drop-title">{t("idp.camera")}</span>
+                          <span className="idp-drop-hint">{t("idp.cameraHint")}</span>
+                        </label>
+                      )}
                       <label className={`idp-drop${file ? " has-file" : ""}`}>
                         <input
                           type="file"
-                          accept="image/*"
-                          capture="environment"
+                          accept={fileAccept(surface?.accept)}
                           disabled={busy}
                           onChange={(e) => void onPickFile(e)}
                         />
-                        <span className="idp-drop-title">{t("idp.camera")}</span>
-                        <span className="idp-drop-hint">{t("idp.cameraHint")}</span>
+                        <span className="idp-drop-icon" aria-hidden="true">
+                          <FileIcon />
+                        </span>
+                        <span className="idp-drop-title">{t("idp.drop")}</span>
+                        <span className="idp-drop-hint">{t("idp.dropHint")}</span>
                       </label>
-                    )}
-                    <label className={`idp-drop${file ? " has-file" : ""}`}>
-                      <input
-                        type="file"
-                        accept={fileAccept(surface?.accept)}
-                        disabled={busy}
-                        onChange={(e) => void onPickFile(e)}
-                      />
-                      <span className="idp-drop-title">{t("idp.drop")}</span>
-                      <span className="idp-drop-hint">{t("idp.dropHint")}</span>
-                    </label>
-                  </div>
-                  {file ? (
-                    <p className="idp-picked" role="status" aria-live="polite" title={file.name}>
-                      {file.name}
-                    </p>
-                  ) : null}
-                </>
-              ) : (
-                <label className={`idp-drop${file ? " has-file" : ""}`}>
-                  <input
-                    type="file"
-                    accept={fileAccept(surface?.accept)}
-                    disabled={busy}
-                    onChange={(e) => void onPickFile(e)}
-                  />
-                  <span className="idp-drop-title">{file ? file.name : t("idp.drop")}</span>
-                  <span className="idp-drop-hint">{t("idp.dropHint")}</span>
-                </label>
-              )}
+                    </div>
+                    {file ? (
+                      <p className="idp-picked" role="status" aria-live="polite" title={file.name}>
+                        <span className="idp-picked-label">{t("idp.fileLabel")}</span>
+                        <span className="idp-picked-name">{file.name}</span>
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <label className={`idp-drop idp-drop--solo${file ? " has-file" : ""}`}>
+                    <input
+                      type="file"
+                      accept={fileAccept(surface?.accept)}
+                      disabled={busy}
+                      onChange={(e) => void onPickFile(e)}
+                    />
+                    <span className="idp-drop-icon" aria-hidden="true">
+                      <FileIcon />
+                    </span>
+                    <span className="idp-drop-title">{file ? file.name : t("idp.drop")}</span>
+                    <span className="idp-drop-hint">{t("idp.dropHint")}</span>
+                  </label>
+                )}
+              </section>
 
-              <button
-                type="button"
-                className="btn idp-run"
-                disabled={busy || !target || !file}
-                onClick={() => void readFile()}
-              >
-                {busy ? t("idp.reading") : t("idp.read")}
-              </button>
+              {!file ? <p className="idp-hint idp-hint--guide">{t("idp.guide")}</p> : null}
             </div>
           ) : null}
 
           {review && !busy ? (
-            <div className="idp-job">
+            <div className="idp-again-row">
               <button
                 type="button"
                 className="btn ghost sm"
@@ -692,7 +741,23 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
           ) : null}
         </div>
 
-        {review && (scanHasContent(review, proposals) || review.ok !== false) ? (
+        {showReadFoot ? (
+          <div className="idp-foot idp-foot--capture">
+            <p className="idp-foot-hint">
+              {!target ? t("idp.needType") : t("idp.readyRead")}
+            </p>
+            <button
+              type="button"
+              className="btn idp-run"
+              disabled={busy || !target || !file}
+              onClick={() => void readFile()}
+            >
+              {t("idp.read")}
+            </button>
+          </div>
+        ) : null}
+
+        {showReviewFoot && review ? (
           <div className="idp-foot">
             {review.error_key && !review.ok ? (
               <p className="idp-err" role="alert">
@@ -702,14 +767,26 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
             {proposals.length > 0 && !(review.error_key && !review.ok) ? (
               <p className="idp-hint">{t("idp.propose.onSave")}</p>
             ) : null}
-            {!canSave && review.detail && review.ok !== false ? <p className="idp-hint">{review.detail}</p> : null}
+            {!canSave && review.detail && review.ok !== false ? (
+              <p className="idp-hint">{review.detail}</p>
+            ) : null}
             {blockHint && !canSave && !review.detail ? <p className="idp-hint">{t(blockHint)}</p> : null}
             <div className="idp-jobs">
-              <button type="button" className="btn" disabled={busy || !canSave} onClick={() => void saveDraft(false)}>
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || !canSave}
+                onClick={() => void saveDraft(false)}
+              >
                 {phase === "saving" ? t("idp.saving") : t(review.save_key || "idp.save")}
               </button>
               {canSubmit && !review.can_delete ? (
-                <button type="button" className="btn ghost" disabled={busy || !canSave} onClick={() => void saveDraft(true)}>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={busy || !canSave}
+                  onClick={() => void saveDraft(true)}
+                >
                   {t("idp.submit")}
                 </button>
               ) : null}
@@ -718,6 +795,25 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 8.5h2.2l1.3-2h5l1.3 2H20v10H4z" />
+      <circle cx="12" cy="13" r="3.2" />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 3.5h7l4 4V20.5H7z" />
+      <path d="M14 3.5V8h4" />
+      <path d="M10 12h6M10 15.5h6" />
+    </svg>
   );
 }
 
