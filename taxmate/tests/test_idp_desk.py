@@ -202,7 +202,7 @@ class TestIdpDeskSurface(unittest.TestCase):
 		}
 		self.assertEqual(
 			gaps_from_validation(validation),
-			["f.customer", "idp.field.total", "idp.gap.items"],
+			["f.customer", "idp.gap.items"],
 		)
 
 	def test_a_missing_cost_center_can_be_typed_and_submit_stays_off(self):
@@ -228,8 +228,10 @@ class TestIdpDeskSurface(unittest.TestCase):
 		self.assertTrue(review["can_submit"])
 		self.assertEqual(review["gaps"], [])
 		self.assertEqual(
-			[row["field"] for row in review["writes"]], ["due_date", "cost_center", "vat_emirate"]
+			[row["field"] for row in review["writes"]],
+			["currency", "due_date", "cost_center", "vat_emirate"],
 		)
+		self.assertIn("AED", review["writes"][0]["options"])
 		self.assertIn("Dubai", review["writes"][-1]["options"])
 		instructions = draft_instructions(extracted)
 		self.assertFalse(instructions["submit"])
@@ -248,6 +250,37 @@ class TestIdpDeskSurface(unittest.TestCase):
 		self.assertFalse(submit_requested(""))
 		self.assertFalse(submit_requested("0"))
 		self.assertTrue(submit_requested("1"))
+
+	def test_missing_currency_is_asked_not_only_listed(self):
+		extracted = {
+			"success": True,
+			"extracted_data": {
+				"doctype": "Sales Invoice",
+				"header": {"customer": "Acme", "posting_date": "2026-09-27", "due_date": "2026-10-27"},
+				"items": [{"item_name": "Paper"}],
+			},
+			"validation": {
+				"is_valid": False,
+				"errors": [
+					{"field": "currency", "message": 'Required field "Currency" is missing'},
+					{"field": "selling_price_list", "message": 'Required field "Price List" is missing'},
+				],
+				"warnings": [],
+				"missing_masters": [],
+			},
+		}
+		review = review_from_extract(extracted, route="/invoices")
+		self.assertTrue(review["can_save"])
+		self.assertEqual(review["gaps"], [])
+		currency_write = next(row for row in review["writes"] if row["field"] == "currency")
+		self.assertEqual(currency_write["label_key"], "f.currency")
+		self.assertEqual(currency_write["options"][0], "AED")
+		header, _items = apply_writes(
+			extracted["extracted_data"]["header"],
+			extracted["extracted_data"]["items"],
+			{"currency": "aed"},
+		)
+		self.assertEqual(header["currency"], "AED")
 
 	def test_calculated_invoice_fields_do_not_block_the_draft(self):
 		extracted = {

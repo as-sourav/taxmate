@@ -855,6 +855,7 @@ def _draft_defaults(items: list) -> dict:
 	return {
 		"company": company or "",
 		"cost_center": frappe.db.get_value("Company", company, "cost_center") if company else "",
+		"currency": frappe.db.get_value("Company", company, "default_currency") if company else "",
 		"income_account": frappe.db.get_value("Company", company, "default_income_account")
 		if company
 		else "",

@@ -571,8 +571,8 @@ _ERP_FILLED: frozenset[str] = _SYSTEM_GAPS | frozenset(
 )
 
 # The clerk can type these when the file does not carry them.
-# Place of supply is required on a UAE sales invoice. Submit stays off unless they ask.
-_WRITABLE: tuple[str, ...] = ("due_date", "cost_center", "vat_emirate")
+# Currency and place of supply block the draft until filled. Submit stays off unless they ask.
+_WRITABLE: tuple[str, ...] = ("currency", "due_date", "cost_center", "vat_emirate")
 _SALES_EMIRATE: frozenset[str] = frozenset({"Sales Invoice", "Sales Order"})
 EMIRATES: tuple[str, ...] = (
 	"Abu Dhabi",
@@ -582,6 +582,24 @@ EMIRATES: tuple[str, ...] = (
 	"Ras Al Khaimah",
 	"Sharjah",
 	"Umm Al Quwain",
+)
+# AED first for UAE TaxMate; rest match masters._CURRENCY_CODES.
+CURRENCIES: tuple[str, ...] = (
+	"AED",
+	"USD",
+	"EUR",
+	"GBP",
+	"SAR",
+	"INR",
+	"QAR",
+	"OMR",
+	"BHD",
+	"KWD",
+	"CNY",
+	"JPY",
+	"CHF",
+	"AUD",
+	"CAD",
 )
 
 
@@ -628,13 +646,16 @@ def writes_from_extract(
 			continue
 		if header.get(field) and field not in missing:
 			continue
+		raw = header.get(field)
 		row: dict[str, Any] = {
 			"field": field,
 			"label_key": label_key_for(field),
-			"value": "" if header.get(field) in (None, "") else str(header.get(field)),
+			"value": "" if raw in (None, "") else str(raw).strip().upper() if field == "currency" else str(raw),
 		}
 		if field == "vat_emirate":
 			row["options"] = list(EMIRATES)
+		elif field == "currency":
+			row["options"] = list(CURRENCIES)
 		rows.append(row)
 	return rows
 
@@ -673,7 +694,7 @@ def apply_writes(
 	for field in _WRITABLE:
 		text = str((fills or {}).get(field) or "").strip()
 		if text:
-			out[field] = text[:140]
+			out[field] = text.strip().upper()[:3] if field == "currency" else text[:140]
 	tax = str(out.get("taxes_and_charges") or "").strip()
 	if tax and re.fullmatch(r"[\d,.]+", tax):
 		out.pop("taxes_and_charges", None)
@@ -708,6 +729,10 @@ def finish_draft(
 		out.pop("vat_emirate", None)
 	if not out.get("company") and defaults.get("company"):
 		out["company"] = str(defaults["company"])
+	if not out.get("currency"):
+		fallback_currency = str(defaults.get("currency") or "").strip().upper()
+		if fallback_currency in CURRENCIES:
+			out["currency"] = fallback_currency
 	if not out.get("selling_price_list") and defaults.get("selling_price_list"):
 		out["selling_price_list"] = str(defaults["selling_price_list"])
 	income = str(defaults.get("income_account") or "")
