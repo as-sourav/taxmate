@@ -564,7 +564,9 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
           </div>
         ) : null}
 
-        <div className={`idp-body${cropping ? " idp-body--crop" : ""}`}>
+        <div
+          className={`idp-body${cropping ? " idp-body--crop" : ""}${showReadFoot || showReviewFoot ? " idp-body--foot" : ""}`}
+        >
           {res.error ? <p className="idp-err">{readableError(res.error).join(" ")}</p> : null}
           {!surface && res.isLoading ? <p className="idp-hint">{t("idp.loading")}</p> : null}
           {surface && !action ? <p className="idp-hint">{t("idp.empty")}</p> : null}
