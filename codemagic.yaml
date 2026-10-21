@@ -1,84 +1,35 @@
 workflows:
-  ios-workflow:
-    name: Taxmate iOS Build
-    max_build_duration: 60
-    
-environment:
-  xcode: latest
-  vars:
-    XCODE_PROJECT: ios/App/App.xcodeproj
-    XCODE_SCHEME: App
+  capacitor-ios:
+    name: Capacitor iOS Build
+    max_build_duration: 120
+    instance_type: mac_mini_m2
 
-scripts:
-  - name: Locate frontend project
-    script: |
-      set -eu
+    environment:
+      vars:
+        XCODE_PROJECT: "ios/App/App.xcodeproj"
+        XCODE_SCHEME: "App"
 
-      echo "Repository: $CM_BUILD_DIR"
+    scripts:
+      - name: Install npm dependencies
+        script: npm ci
 
-      PACKAGE_FILE=""
+      - name: Build web application
+        script: npm run build
 
-      while IFS= read -r file; do
-        if node -e '
-          const p = require(process.argv[1]);
-          process.exit(p.scripts && p.scripts.build ? 0 : 1);
-        ' "$file"; then
-          PACKAGE_FILE="$file"
-          break
-        fi
-      done < <(find "$CM_BUILD_DIR" \
-        -name package.json \
-        -not -path '*/node_modules/*' \
-        -not -path '*/ios/Pods/*' \
-        -not -path '*/.git/*')
+      - name: Sync Capacitor iOS
+        script: npx cap sync ios
 
-      if [ -z "$PACKAGE_FILE" ]; then
-        echo "ERROR: No package.json containing a build script was found."
-        find "$CM_BUILD_DIR" -name package.json \
-          -not -path '*/node_modules/*'
-        exit 1
-      fi
+      - name: Install CocoaPods dependencies
+        script: |
+          cd ios/App
+          pod install
 
-      PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
-      echo "$PROJECT_DIR" > /tmp/taxmate_project_dir
-      echo "Using project directory: $PROJECT_DIR"
+      - name: Build iOS application
+        script: |
+          xcode-project build-ipa \
+            --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
 
-      node -e 'console.log(require(process.argv[1]).scripts)' "$PACKAGE_FILE"
-
-  - name: Install npm dependencies
-    script: |
-      set -eu
-      PROJECT_DIR="$(cat /tmp/taxmate_project_dir)"
-      cd "$PROJECT_DIR"
-      npm ci
-
-  - name: Build web application
-    script: |
-      set -eu
-      PROJECT_DIR="$(cat /tmp/taxmate_project_dir)"
-      cd "$PROJECT_DIR"
-      npm run build
-
-  - name: Sync Capacitor iOS
-    script: |
-      set -eu
-      PROJECT_DIR="$(cat /tmp/taxmate_project_dir)"
-      cd "$PROJECT_DIR"
-      npx cap sync ios
-
-  - name: Install CocoaPods dependencies
-    script: |
-      set -eu
-      cd "$CM_BUILD_DIR/ios/App"
-      pod install
-
-  - name: Build iOS application
-    script: |
-      set -eu
-      xcode-project build-ipa \
-        --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
-        --scheme "$XCODE_SCHEME"
-
-artifacts:
-  - build/ios/ipa/*.ipa
-  - /tmp/xcodebuild_logs/*.log
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
