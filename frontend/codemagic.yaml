@@ -1,36 +1,50 @@
+environment:
+  vars:
+    XCODE_PROJECT: "ios/App/App.xcodeproj"
+    XCODE_SCHEME: "App"
+  xcode: latest
 
-workflows:
-  capacitor-ios:
-    name: Capacitor iOS Build
-    max_build_duration: 120
-    instance_type: mac_mini_m2
+scripts:
+  - name: Check project directory
+    script: |
+      echo "Build directory: $CM_BUILD_DIR"
+      pwd
+      ls -la
+      echo "Checking package.json scripts..."
+      npm run
 
-    environment:
-      vars:
-        XCODE_PROJECT: "ios/App/App.xcodeproj"
-        XCODE_SCHEME: "App"
+  - name: Install npm dependencies
+    script: |
+      npm ci
 
-    scripts:
-      - name: Install npm dependencies
-        script: npm ci
+  - name: Build web application
+    script: |
+      npm run build
 
-      - name: Build web application
-        script: npm run build
+  - name: Verify web build output
+    script: |
+      test -d dist || {
+        echo "ERROR: Vite build did not create the dist directory."
+        exit 1
+      }
+      echo "Web build completed successfully."
 
-      - name: Sync Capacitor iOS
-        script: npx cap sync ios
+  - name: Sync Capacitor iOS
+    script: |
+      npx cap sync ios
 
-      - name: Install CocoaPods dependencies
-        script: |
-          cd ios/App
-          pod install
+  - name: Install CocoaPods dependencies
+    script: |
+      cd "$CM_BUILD_DIR/ios/App"
+      pod install
 
-      - name: Build iOS application
-        script: |
-          xcode-project build-ipa \
-            --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
-            --scheme "$XCODE_SCHEME"
+  - name: Build iOS application
+    script: |
+      xcode-project build-ipa \
+        --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
+        --scheme "$XCODE_SCHEME"
 
-    artifacts:
-      - build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
+artifacts:
+  - build/ios/ipa/*.ipa
+  - /tmp/xcodebuild_logs/*.log
+  - ios/App/build/**/*.dSYM
