@@ -126,7 +126,11 @@ def _verify_signature(raw_body: bytes) -> bool:
 	"""
 	settings = frappe.get_cached_doc("UAE Tax Settings")
 	getter = getattr(settings, "get_password", None)
-	secret = getter("webhook_secret", raise_exception=False) if callable(getter) else settings.get("webhook_secret")
+	secret = (
+		getter("webhook_secret", raise_exception=False)
+		if callable(getter)
+		else settings.get("webhook_secret")
+	)
 	if not secret:
 		return False
 	headers = frappe.request.headers
