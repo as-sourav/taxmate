@@ -79,7 +79,7 @@ def register_webhook():
 	from taxmate.uae_e_invoicing.utils.e_invoice import get_api
 
 	settings = frappe.get_doc("UAE Tax Settings")
-	secret = settings.get_password("webhook_secret") if settings.webhook_secret else None
+	secret = settings.get_password("webhook_secret", raise_exception=False)
 	if not secret:
 		frappe.throw(_("Set a Webhook Secret in UAE Tax Settings first."))
 
@@ -125,10 +125,10 @@ def _verify_signature(raw_body: bytes) -> bool:
 	in UAE Tax Settings; sandbox is not an exception.
 	"""
 	settings = frappe.get_cached_doc("UAE Tax Settings")
-	if not settings.webhook_secret:
+	getter = getattr(settings, "get_password", None)
+	secret = getter("webhook_secret", raise_exception=False) if callable(getter) else settings.get("webhook_secret")
+	if not secret:
 		return False
-
-	secret = settings.get_password("webhook_secret")
 	headers = frappe.request.headers
 
 	signature = headers.get("X-Webhook-Signature")

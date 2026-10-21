@@ -37,13 +37,18 @@ class BaseAPI:
 	# ------------------------------------------------------------------
 
 	def get_auth_headers(self) -> dict[str, str]:
-		"""Prefer OAuth2 client-credentials; fall back to the static auth key."""
-		if self.settings.client_id and self.settings.client_secret:
+		"""Prefer OAuth2 client-credentials; fall back to the static auth key.
+
+		Password values live in ``__Auth``. They are not loaded onto the document.
+		"""
+		client_id = (self.settings.get("client_id") or "").strip()
+		client_secret = self.settings.get_password("client_secret", raise_exception=False)
+		if client_id and client_secret:
 			token = self._get_valid_access_token()
 			return {"Authorization": f"Bearer {token}"}
 
-		if self.settings.auth_key:
-			key = self.settings.get_password("auth_key")
+		key = self.settings.get_password("auth_key", raise_exception=False)
+		if key:
 			if self.AUTH_KEY_HEADER == "Authorization":
 				return {"Authorization": f"Bearer {key}"}
 			return {self.AUTH_KEY_HEADER: key}
