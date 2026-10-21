@@ -1,5 +1,8 @@
-workflows: ios-workflow: name: Taxmate iOS Build max_build_duration: 60
-
+workflows:
+  ios-workflow:
+    name: Taxmate iOS Build
+    max_build_duration: 60
+    
 environment:
   xcode: latest
   vars:
