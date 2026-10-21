@@ -12,7 +12,9 @@ workflows:
 
     scripts:
       - name: Install npm dependencies
-        script: npm ci
+        script: | 
+          cd frontend
+          npm ci
 
       - name: Build web application
         script: npm run build
@@ -20,10 +22,7 @@ workflows:
       - name: Sync Capacitor iOS
         script: npx cap sync ios
 
-      - name: Install npm dependencies
-        script: |
-        cd frontend
-        npm ci
+     
 
       - name: Install CocoaPods dependencies
         script: |
