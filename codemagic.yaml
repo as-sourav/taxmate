@@ -9,31 +9,53 @@ workflows:
       vars:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
-      # Optionally specify your Node.js version if needed
-      # Use the version supported by your project.
+        NODE_VERSION: "22"
 
     scripts:
+      - name: Locate frontend project
+        script: |
+          set -e
+
+          echo "Repository directory: $CM_BUILD_DIR"
+          echo "Searching for package.json..."
+
+          PACKAGE_FILE=$(find "$CM_BUILD_DIR" \
+            -maxdepth 5 \
+            -type f \
+            -name package.json \
+            -not -path '*/node_modules/*' \
+            -not -path '*/ios/App/Pods/*' \
+            | head -n 1)
+
+          if [ -z "$PACKAGE_FILE" ]; then
+            echo "ERROR: Cannot find package.json in the repository."
+            echo "Check that your frontend source code is committed."
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PACKAGE_FILE")
+          echo "Frontend project found: $PROJECT_DIR"
+
+          echo "$PROJECT_DIR" > /tmp/frontend_project_dir.txt
+
       - name: Check Node.js and npm
         script: |
           set -e
-          echo "Node.js version:"
           node --version
-          echo "npm version:"
           npm --version
-          echo "Working directory:"
-          pwd
-          ls -la
 
       - name: Install npm dependencies
         script: |
           set -e
-          if [ ! -f package.json ]; then
-            echo "ERROR: package.json not found in $CM_BUILD_DIR"
-            exit 1
-          fi
+
+          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+          cd "$PROJECT_DIR"
+
+          echo "Installing dependencies in: $(pwd)"
 
           if [ ! -f package-lock.json ]; then
-            echo "ERROR: package-lock.json not found. Commit your lock file or use npm install."
+            echo "ERROR: package-lock.json not found in $PROJECT_DIR"
+            echo "Commit the matching package-lock.json to your repository."
             exit 1
           fi
 
@@ -42,26 +64,41 @@ workflows:
       - name: Build web application
         script: |
           set -e
-          npm run build
+
+          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+          cd "$PROJECT_DIR"
+
+          npm run build:mobile
 
       - name: Sync Capacitor iOS
         script: |
           set -e
+
+          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+          cd "$PROJECT_DIR"
+
           npx cap sync ios
 
       - name: Install CocoaPods dependencies
         script: |
           set -e
-          cd ios/App
+
+          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+          cd "$PROJECT_DIR/ios/App"
+
           pod install
 
       - name: Build iOS application
         script: |
           set -e
+
+          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+
           xcode-project build-ipa \
-            --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
+            --project "$PROJECT_DIR/$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
 
     artifacts:
-      - build/ios/ipa/*.ipa
+      - "**/build/ios/ipa/*.ipa"
+      - "**/ios/App/build/**/*.ipa"
       - /tmp/xcodebuild_logs/*.log
