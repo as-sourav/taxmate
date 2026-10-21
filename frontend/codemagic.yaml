@@ -1,35 +1,79 @@
-workflows: capacitor-ios: name: TaxMate Build Diagnostic max_build_duration: 120 instance_type: mac_mini_m2
+workflows: capacitor-ios: name: TaxMate iOS Build max_build_duration: 120 instance_type: mac_mini_m2
+
+environment:
+  xcode: latest
+  vars:
+    XCODE_PROJECT: ios/App/App.xcodeproj
+    XCODE_SCHEME: App
 
 scripts:
-  - name: Find package.json and build script
+  - name: Locate frontend project
     script: |
       set -eu
 
-      echo "========== CODEMAGIC DIRECTORY =========="
-      echo "CM_BUILD_DIR=$CM_BUILD_DIR"
-      cd "$CM_BUILD_DIR"
-      pwd
+      echo "Repository: $CM_BUILD_DIR"
 
-      echo "========== FIND PACKAGE FILES =========="
-      find "$CM_BUILD_DIR" \
+      PACKAGE_FILE=""
+
+      while IFS= read -r file; do
+        if node -e '
+          const p = require(process.argv[1]);
+          process.exit(p.scripts && p.scripts.build ? 0 : 1);
+        ' "$file"; then
+          PACKAGE_FILE="$file"
+          break
+        fi
+      done < <(find "$CM_BUILD_DIR" \
         -name package.json \
         -not -path '*/node_modules/*' \
         -not -path '*/ios/Pods/*' \
-        -not -path '*/.git/*' \
-        -print
+        -not -path '*/.git/*')
 
-      echo "========== ROOT PACKAGE.JSON =========="
-      if [ -f "$CM_BUILD_DIR/package.json" ]; then
-        cat "$CM_BUILD_DIR/package.json"
-      else
-        echo "No package.json in repository root"
+      if [ -z "$PACKAGE_FILE" ]; then
+        echo "ERROR: No package.json containing a build script was found."
+        find "$CM_BUILD_DIR" -name package.json \
+          -not -path '*/node_modules/*'
+        exit 1
       fi
 
-      echo "========== ROOT NPM SCRIPTS =========="
-      if [ -f "$CM_BUILD_DIR/package.json" ]; then
-        npm run
-      fi
+      PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
+      echo "$PROJECT_DIR" > /tmp/taxmate_project_dir
+      echo "Using project directory: $PROJECT_DIR"
+      node -e 'console.log(require(process.argv[1]).scripts)' "$PACKAGE_FILE"
 
-      echo "========== CHECK GIT COMMIT =========="
-      git rev-parse --short HEAD || true
-      git status --short || true
+  - name: Install npm dependencies
+    script: |
+      set -eu
+      PROJECT_DIR="$(cat /tmp/taxmate_project_dir)"
+      cd "$PROJECT_DIR"
+      npm ci
+
+  - name: Build web application
+    script: |
+      set -eu
+      PROJECT_DIR="$(cat /tmp/taxmate_project_dir)"
+      cd "$PROJECT_DIR"
+      pwd
+      npm run build
+
+  - name: Sync Capacitor iOS
+    script: |
+      set -eu
+      PROJECT_DIR="$(cat /tmp/taxmate_project_dir)"
+      cd "$PROJECT_DIR"
+      npx cap sync ios
+
+  - name: Install CocoaPods dependencies
+    script: |
+      cd "$CM_BUILD_DIR/ios/App"
+      pod install
+
+  - name: Build iOS application
+    script: |
+      xcode-project build-ipa \
+        --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
+        --scheme "$XCODE_SCHEME"
+
+artifacts:
+  - build/ios/ipa/*.ipa
+  - /tmp/xcodebuild_logs/*.log
