@@ -1,6 +1,5 @@
 workflows: capacitor-ios: name: TaxMate iOS Build max_build_duration: 120 instance_type: mac_mini_m2
 
-
 environment:
   xcode: latest
   vars:
@@ -40,6 +39,7 @@ scripts:
       PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
       echo "$PROJECT_DIR" > /tmp/taxmate_project_dir
       echo "Using project directory: $PROJECT_DIR"
+
       node -e 'console.log(require(process.argv[1]).scripts)' "$PACKAGE_FILE"
 
   - name: Install npm dependencies
@@ -54,7 +54,6 @@ scripts:
       set -eu
       PROJECT_DIR="$(cat /tmp/taxmate_project_dir)"
       cd "$PROJECT_DIR"
-      pwd
       npm run build
 
   - name: Sync Capacitor iOS
@@ -66,11 +65,13 @@ scripts:
 
   - name: Install CocoaPods dependencies
     script: |
+      set -eu
       cd "$CM_BUILD_DIR/ios/App"
       pod install
 
   - name: Build iOS application
     script: |
+      set -eu
       xcode-project build-ipa \
         --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
         --scheme "$XCODE_SCHEME"
