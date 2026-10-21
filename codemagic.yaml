@@ -15,7 +15,7 @@ workflows:
       vars:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "com.ascratech.taxmate"
-        APPLE_DEVELOPER_EMAIL: "apple@ascratech.com"
+        PROVISIONING_PROFILE_NAME: "taxmate"
 
       node: latest
       xcode: latest
@@ -52,13 +52,11 @@ workflows:
 
           PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
           echo "$PROJECT_DIR" > /tmp/taxmate_project_dir.txt
-
           echo "Project directory: $PROJECT_DIR"
 
       - name: Check build environment
         script: |
           set -euo pipefail
-
           node --version
           npm --version
           xcodebuild -version
@@ -116,23 +114,6 @@ workflows:
             exit 1
           fi
 
-      - name: Verify bundle identifier
-        script: |
-          set -euo pipefail
-
-          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
-          IOS_PROJECT="$PROJECT_DIR/ios/App/App.xcodeproj"
-
-          xcodebuild \
-            -showBuildSettings \
-            -project "$IOS_PROJECT" \
-            -scheme "$XCODE_SCHEME" \
-            | grep -E 'PRODUCT_BUNDLE_IDENTIFIER|PRODUCT_NAME' \
-            || true
-
-          echo "Expected bundle identifier: $BUNDLE_ID"
-          echo "Apple Developer account: $APPLE_DEVELOPER_EMAIL"
-
       - name: Configure iOS code signing
         script: |
           set -euo pipefail
@@ -140,6 +121,7 @@ workflows:
           PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
           cd "$PROJECT_DIR"
 
+          # Uses signing assets configured in Codemagic.
           xcode-project use-profiles
 
       - name: Resolve Swift dependencies
