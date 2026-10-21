@@ -1,7 +1,7 @@
 
 workflows:
   capacitor-ios:
-    name: Capacitor iOS Build
+    name: TaxMate iOS Build
     max_build_duration: 120
     instance_type: mac_mini_m2
 
@@ -20,6 +20,7 @@ workflows:
             -type f \
             -name package.json \
             -not -path '*/node_modules/*' \
+            -not -path '*/ios/App/Pods/*' \
             | head -n 1)
 
           if [ -z "$PACKAGE_FILE" ]; then
@@ -31,6 +32,7 @@ workflows:
           echo "$PROJECT_DIR" > /tmp/frontend_project_dir.txt
 
           echo "Frontend project: $PROJECT_DIR"
+          echo "Repository: $CM_BUILD_DIR"
 
       - name: Check build tools
         script: |
@@ -38,68 +40,84 @@ workflows:
           node --version
           npm --version
           xcodebuild -version
-          pod --version
+          xcodebuild -showsdks
 
       - name: Install npm dependencies
         script: |
           set -e
+
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
           cd "$PROJECT_DIR"
 
-          test -f package-lock.json || {
-            echo "ERROR: package-lock.json is missing"
+          if [ ! -f package-lock.json ]; then
+            echo "ERROR: package-lock.json not found"
             exit 1
-          }
+          fi
 
           npm ci --no-audit --no-fund
 
       - name: Build web application
         script: |
           set -e
+
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
           cd "$PROJECT_DIR"
 
           npm run build:mobile
 
-      - name: Generate iOS project
+          if [ ! -d dist-mobile ]; then
+            echo "ERROR: dist-mobile was not generated"
+            exit 1
+          fi
+
+      - name: Prepare iOS project with SPM
         script: |
           set -e
+
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
           cd "$PROJECT_DIR"
 
           if [ ! -f capacitor.config.ts ] && \
              [ ! -f capacitor.config.json ] && \
              [ ! -f capacitor.config.js ]; then
-            echo "ERROR: Capacitor configuration file not found"
+            echo "ERROR: Capacitor configuration not found"
             exit 1
           fi
 
           if [ ! -d ios ]; then
-            echo "Generating the iOS project..."
-            npx cap add ios
+            echo "Creating iOS project using Swift Package Manager..."
+            npx cap add ios --packagemanager SPM
           else
-            echo "iOS project already exists; keeping existing native files"
+            echo "Existing iOS project found; preserving it"
           fi
 
           npx cap sync ios
 
-          if [ ! -f ios/App/Podfile ]; then
-            echo "ERROR: Podfile was not generated at ios/App/Podfile"
-            find ios -name Podfile -print || true
+          if [ ! -d ios/App/App.xcodeproj ]; then
+            echo "ERROR: ios/App/App.xcodeproj not found"
+            find ios -maxdepth 5 \
+              \( -name '*.xcodeproj' -o -name '*.xcworkspace' \) \
+              -print || true
             exit 1
           fi
 
-      - name: Install CocoaPods dependencies
+          echo "iOS project ready"
+
+      - name: Resolve Swift package dependencies
         script: |
           set -e
-          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
-          cd "$PROJECT_DIR/ios/App"
 
-          pod install
+          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project "$PROJECT_DIR/ios/App/App.xcodeproj" \
+            -scheme "$XCODE_SCHEME"
 
       - name: Build iOS IPA
         script: |
           set -e
+
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
 
           xcode-project build-ipa \
