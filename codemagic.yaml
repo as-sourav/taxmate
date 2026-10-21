@@ -7,17 +7,12 @@ workflows:
 
     environment:
       vars:
-        XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
-        NODE_VERSION: "22"
 
     scripts:
       - name: Locate frontend project
         script: |
           set -e
-
-          echo "Repository directory: $CM_BUILD_DIR"
-          echo "Searching for package.json..."
 
           PACKAGE_FILE=$(find "$CM_BUILD_DIR" \
             -maxdepth 5 \
@@ -28,15 +23,15 @@ workflows:
             | head -n 1)
 
           if [ -z "$PACKAGE_FILE" ]; then
-            echo "ERROR: Cannot find package.json in the repository."
-            echo "Check that your frontend source code is committed."
+            echo "ERROR: package.json not found."
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PACKAGE_FILE")
-          echo "Frontend project found: $PROJECT_DIR"
-
           echo "$PROJECT_DIR" > /tmp/frontend_project_dir.txt
+
+          echo "Frontend directory: $PROJECT_DIR"
+          ls -la "$PROJECT_DIR"
 
       - name: Check Node.js and npm
         script: |
@@ -51,11 +46,8 @@ workflows:
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
           cd "$PROJECT_DIR"
 
-          echo "Installing dependencies in: $(pwd)"
-
           if [ ! -f package-lock.json ]; then
-            echo "ERROR: package-lock.json not found in $PROJECT_DIR"
-            echo "Commit the matching package-lock.json to your repository."
+            echo "ERROR: package-lock.json not found."
             exit 1
           fi
 
@@ -70,14 +62,26 @@ workflows:
 
           npm run build:mobile
 
-      - name: Sync Capacitor iOS
+      - name: Prepare Capacitor iOS project
         script: |
           set -e
 
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
           cd "$PROJECT_DIR"
 
+          if [ ! -d ios ]; then
+            echo "iOS platform directory missing. Adding Capacitor iOS..."
+            npx cap add ios
+          fi
+
           npx cap sync ios
+
+          if [ ! -f ios/App/Podfile ]; then
+            echo "ERROR: ios/App/Podfile was not generated."
+            echo "Checking available Podfiles..."
+            find ios -name Podfile -print || true
+            exit 1
+          fi
 
       - name: Install CocoaPods dependencies
         script: |
@@ -94,8 +98,15 @@ workflows:
 
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
 
+          if [ ! -d "$PROJECT_DIR/ios/App/App.xcodeproj" ]; then
+            echo "ERROR: App.xcodeproj not found."
+            find "$PROJECT_DIR/ios" -maxdepth 4 \
+              \( -name '*.xcodeproj' -o -name '*.xcworkspace' \) -print
+            exit 1
+          fi
+
           xcode-project build-ipa \
-            --project "$PROJECT_DIR/$XCODE_PROJECT" \
+            --project "$PROJECT_DIR/ios/App/App.xcodeproj" \
             --scheme "$XCODE_SCHEME"
 
     artifacts:
