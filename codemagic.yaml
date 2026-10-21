@@ -1,9 +1,11 @@
-
 workflows:
   capacitor-ios:
-    name: TaxMate iOS Build
+    name: TaxMate iOS Development Build
     max_build_duration: 120
     instance_type: mac_mini_m2
+
+    integrations:
+      app_store_connect: taxmate-app-store-connect
 
     environment:
       ios_signing:
@@ -12,6 +14,9 @@ workflows:
 
       vars:
         XCODE_SCHEME: "App"
+
+      node: latest
+      xcode: latest
 
     scripts:
       - name: Locate frontend project
@@ -32,7 +37,6 @@ workflows:
 
           PROJECT_DIR=$(dirname "$PACKAGE_FILE")
           echo "$PROJECT_DIR" > /tmp/frontend_project_dir.txt
-
           echo "Frontend project: $PROJECT_DIR"
 
       - name: Check build environment
@@ -85,7 +89,7 @@ workflows:
           fi
 
           if [ ! -d ios ]; then
-            echo "Creating iOS project with Swift Package Manager"
+            echo "Creating iOS project"
             npx cap add ios --packagemanager SPM
           else
             echo "Existing iOS project found"
@@ -118,7 +122,7 @@ workflows:
             -project "$PROJECT_DIR/ios/App/App.xcodeproj" \
             -scheme "$XCODE_SCHEME"
 
-      - name: Build iOS IPA
+      - name: Build development IPA
         script: |
           set -e
 
@@ -130,5 +134,4 @@ workflows:
 
     artifacts:
       - build/ios/ipa/*.ipa
-      - "**/*.ipa"
       - /tmp/xcodebuild_logs/*.log
