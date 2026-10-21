@@ -1,0 +1,79 @@
+environment:
+  xcode: latest
+  vars:
+    XCODE_PROJECT: ios/App/App.xcodeproj
+    XCODE_SCHEME: App
+
+scripts:
+  - name: Locate frontend project
+    script: |
+      set -eu
+
+      echo "Repository: $CM_BUILD_DIR"
+
+      PACKAGE_FILE=""
+
+      while IFS= read -r file; do
+        if node -e '
+          const p = require(process.argv[1]);
+          process.exit(p.scripts && p.scripts.build ? 0 : 1);
+        ' "$file"; then
+          PACKAGE_FILE="$file"
+          break
+        fi
+      done < <(find "$CM_BUILD_DIR" \
+        -name package.json \
+        -not -path '*/node_modules/*' \
+        -not -path '*/ios/Pods/*' \
+        -not -path '*/.git/*')
+
+      if [ -z "$PACKAGE_FILE" ]; then
+        echo "ERROR: No package.json containing a build script was found."
+        find "$CM_BUILD_DIR" -name package.json \
+          -not -path '*/node_modules/*'
+        exit 1
+      fi
+
+      PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
+      echo "$PROJECT_DIR" > /tmp/taxmate_project_dir
+      echo "Using project directory: $PROJECT_DIR"
+
+      node -e 'console.log(require(process.argv[1]).scripts)' "$PACKAGE_FILE"
+
+  - name: Install npm dependencies
+    script: |
+      set -eu
+      PROJECT_DIR="$(cat /tmp/taxmate_project_dir)"
+      cd "$PROJECT_DIR"
+      npm ci
+
+  - name: Build web application
+    script: |
+      set -eu
+      PROJECT_DIR="$(cat /tmp/taxmate_project_dir)"
+      cd "$PROJECT_DIR"
+      npm run build
+
+  - name: Sync Capacitor iOS
+    script: |
+      set -eu
+      PROJECT_DIR="$(cat /tmp/taxmate_project_dir)"
+      cd "$PROJECT_DIR"
+      npx cap sync ios
+
+  - name: Install CocoaPods dependencies
+    script: |
+      set -eu
+      cd "$CM_BUILD_DIR/ios/App"
+      pod install
+
+  - name: Build iOS application
+    script: |
+      set -eu
+      xcode-project build-ipa \
+        --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
+        --scheme "$XCODE_SCHEME"
+
+artifacts:
+  - build/ios/ipa/*.ipa
+  - /tmp/xcodebuild_logs/*.log
