@@ -1,3 +1,4 @@
+
 workflows:
   capacitor-ios:
     name: Capacitor iOS Build
@@ -8,24 +9,55 @@ workflows:
       vars:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
+      # Optionally specify your Node.js version if needed
+      # Use the version supported by your project.
 
     scripts:
+      - name: Check Node.js and npm
+        script: |
+          set -e
+          echo "Node.js version:"
+          node --version
+          echo "npm version:"
+          npm --version
+          echo "Working directory:"
+          pwd
+          ls -la
+
       - name: Install npm dependencies
-        script: npm ci
+        script: |
+          set -e
+          if [ ! -f package.json ]; then
+            echo "ERROR: package.json not found in $CM_BUILD_DIR"
+            exit 1
+          fi
+
+          if [ ! -f package-lock.json ]; then
+            echo "ERROR: package-lock.json not found. Commit your lock file or use npm install."
+            exit 1
+          fi
+
+          npm ci --no-audit --no-fund
 
       - name: Build web application
-        script: npm run build
+        script: |
+          set -e
+          npm run build
 
       - name: Sync Capacitor iOS
-        script: npx cap sync ios
+        script: |
+          set -e
+          npx cap sync ios
 
       - name: Install CocoaPods dependencies
         script: |
+          set -e
           cd ios/App
           pod install
 
       - name: Build iOS application
         script: |
+          set -e
           xcode-project build-ipa \
             --project "$CM_BUILD_DIR/$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
