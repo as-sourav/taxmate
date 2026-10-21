@@ -8,7 +8,7 @@ workflows:
     environment:
       ios_signing:
         distribution_type: development
-        bundle_identifier: com.yourcompany.taxmate
+        bundle_identifier: com.ascratech.taxmate
 
       vars:
         XCODE_SCHEME: "App"
@@ -35,7 +35,7 @@ workflows:
 
           echo "Frontend project: $PROJECT_DIR"
 
-      - name: Check build tools
+      - name: Check build environment
         script: |
           set -e
           node --version
@@ -66,7 +66,7 @@ workflows:
           npm run build:mobile
 
           if [ ! -d dist-mobile ]; then
-            echo "ERROR: dist-mobile directory was not generated"
+            echo "ERROR: dist-mobile was not generated"
             exit 1
           fi
 
@@ -87,6 +87,8 @@ workflows:
           if [ ! -d ios ]; then
             echo "Creating iOS project with Swift Package Manager"
             npx cap add ios --packagemanager SPM
+          else
+            echo "Existing iOS project found"
           fi
 
           npx cap sync ios
