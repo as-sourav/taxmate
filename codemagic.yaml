@@ -21,40 +21,54 @@ workflows:
     scripts:
       - name: Locate frontend project
         script: |
-          set -e
+          set -euo pipefail
 
-          PACKAGE_FILE=$(find "$CM_BUILD_DIR" \
-            -maxdepth 5 \
-            -type f \
-            -name package.json \
-            -not -path '*/node_modules/*' \
-            | head -n 1)
+          PACKAGE_FILE=""
+
+          while IFS= read -r file; do
+            if [ -f "$(dirname "$file")/capacitor.config.ts" ] ||
+               [ -f "$(dirname "$file")/capacitor.config.json" ] ||
+               [ -f "$(dirname "$file")/capacitor.config.js" ]; then
+              PACKAGE_FILE="$file"
+              break
+            fi
+          done < <(
+            find "$CM_BUILD_DIR" \
+              -maxdepth 6 \
+              -type f \
+              -name package.json \
+              -not -path '*/node_modules/*' \
+              -not -path '*/.git/*'
+          )
 
           if [ -z "$PACKAGE_FILE" ]; then
-            echo "ERROR: package.json not found"
+            echo "ERROR: Could not find package.json with Capacitor config."
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$PACKAGE_FILE")
-          echo "$PROJECT_DIR" > /tmp/frontend_project_dir.txt
+          PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
+          echo "$PROJECT_DIR" > /tmp/taxmate_project_dir.txt
+
           echo "Frontend project: $PROJECT_DIR"
 
       - name: Check build environment
         script: |
-          set -e
+          set -euo pipefail
+
           node --version
           npm --version
           xcodebuild -version
+          xcodebuild -showsdks
 
       - name: Install npm dependencies
         script: |
-          set -e
+          set -euo pipefail
 
-          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
           cd "$PROJECT_DIR"
 
           if [ ! -f package-lock.json ]; then
-            echo "ERROR: package-lock.json not found"
+            echo "ERROR: package-lock.json is required for npm ci."
             exit 1
           fi
 
@@ -62,60 +76,87 @@ workflows:
 
       - name: Build web application
         script: |
-          set -e
+          set -euo pipefail
 
-          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
           cd "$PROJECT_DIR"
 
           npm run build:mobile
 
           if [ ! -d dist-mobile ]; then
-            echo "ERROR: dist-mobile was not generated"
+            echo "ERROR: dist-mobile was not generated."
             exit 1
           fi
 
-      - name: Prepare iOS project
-        script: |
-          set -e
+          echo "Web application build completed."
 
-          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+      - name: Prepare Capacitor iOS project
+        script: |
+          set -euo pipefail
+
+          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
           cd "$PROJECT_DIR"
 
-          if [ ! -f capacitor.config.ts ] && \
-             [ ! -f capacitor.config.json ] && \
+          if [ ! -f capacitor.config.ts ] &&
+             [ ! -f capacitor.config.json ] &&
              [ ! -f capacitor.config.js ]; then
-            echo "ERROR: Capacitor configuration file not found"
+            echo "ERROR: Capacitor config file not found."
             exit 1
           fi
 
           if [ ! -d ios ]; then
-            echo "Creating iOS project"
-            npx cap add ios --packagemanager SPM
-          else
-            echo "Existing iOS project found"
+            echo "Creating the iOS platform."
+            npx cap add ios
           fi
 
           npx cap sync ios
 
-          if [ ! -d ios/App/App.xcodeproj ]; then
-            echo "ERROR: ios/App/App.xcodeproj not found"
+          IOS_PROJECT="$PROJECT_DIR/ios/App/App.xcodeproj"
+
+          if [ ! -d "$IOS_PROJECT" ]; then
+            echo "ERROR: $IOS_PROJECT not found."
             exit 1
+          fi
+
+          echo "Capacitor iOS project prepared."
+
+      - name: Verify bundle identifier and scheme
+        script: |
+          set -euo pipefail
+
+          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
+          IOS_PROJECT="$PROJECT_DIR/ios/App/App.xcodeproj"
+
+          echo "Available schemes:"
+          xcodebuild -list -project "$IOS_PROJECT"
+
+          if ! xcodebuild \
+            -showBuildSettings \
+            -project "$IOS_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            2>/dev/null |
+            grep -Fq 'PRODUCT_BUNDLE_IDENTIFIER = com.ascratech.taxmate'; then
+            echo "WARNING: Verify PRODUCT_BUNDLE_IDENTIFIER in Xcode."
+            echo "Expected: com.ascratech.taxmate"
           fi
 
       - name: Configure iOS code signing
         script: |
-          set -e
+          set -euo pipefail
 
-          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
           cd "$PROJECT_DIR"
 
-          xcode-project use-profiles
+          # Requires a matching development certificate and profile
+          # to be available in Codemagic Code signing identities.
+          xcode-project use-profiles \
+            --project "ios/App/App.xcodeproj"
 
       - name: Resolve Swift dependencies
         script: |
-          set -e
+          set -euo pipefail
 
-          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
 
           xcodebuild \
             -resolvePackageDependencies \
@@ -124,9 +165,9 @@ workflows:
 
       - name: Build development IPA
         script: |
-          set -e
+          set -euo pipefail
 
-          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
 
           xcode-project build-ipa \
             --project "$PROJECT_DIR/ios/App/App.xcodeproj" \
@@ -135,3 +176,4 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
