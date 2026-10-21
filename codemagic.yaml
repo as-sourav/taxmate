@@ -14,6 +14,8 @@ workflows:
 
       vars:
         XCODE_SCHEME: "App"
+        BUNDLE_ID: "com.ascratech.taxmate"
+        APPLE_DEVELOPER_EMAIL: "apple@ascratech.com"
 
       node: latest
       xcode: latest
@@ -26,9 +28,11 @@ workflows:
           PACKAGE_FILE=""
 
           while IFS= read -r file; do
-            if [ -f "$(dirname "$file")/capacitor.config.ts" ] ||
-               [ -f "$(dirname "$file")/capacitor.config.json" ] ||
-               [ -f "$(dirname "$file")/capacitor.config.js" ]; then
+            DIR="$(dirname "$file")"
+
+            if [ -f "$DIR/capacitor.config.ts" ] ||
+               [ -f "$DIR/capacitor.config.json" ] ||
+               [ -f "$DIR/capacitor.config.js" ]; then
               PACKAGE_FILE="$file"
               break
             fi
@@ -42,14 +46,14 @@ workflows:
           )
 
           if [ -z "$PACKAGE_FILE" ]; then
-            echo "ERROR: Could not find package.json with Capacitor config."
+            echo "ERROR: Capacitor package.json not found."
             exit 1
           fi
 
           PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
           echo "$PROJECT_DIR" > /tmp/taxmate_project_dir.txt
 
-          echo "Frontend project: $PROJECT_DIR"
+          echo "Project directory: $PROJECT_DIR"
 
       - name: Check build environment
         script: |
@@ -58,7 +62,6 @@ workflows:
           node --version
           npm --version
           xcodebuild -version
-          xcodebuild -showsdks
 
       - name: Install npm dependencies
         script: |
@@ -68,7 +71,7 @@ workflows:
           cd "$PROJECT_DIR"
 
           if [ ! -f package-lock.json ]; then
-            echo "ERROR: package-lock.json is required for npm ci."
+            echo "ERROR: package-lock.json not found."
             exit 1
           fi
 
@@ -88,8 +91,6 @@ workflows:
             exit 1
           fi
 
-          echo "Web application build completed."
-
       - name: Prepare Capacitor iOS project
         script: |
           set -euo pipefail
@@ -105,40 +106,32 @@ workflows:
           fi
 
           if [ ! -d ios ]; then
-            echo "Creating the iOS platform."
             npx cap add ios
           fi
 
           npx cap sync ios
 
-          IOS_PROJECT="$PROJECT_DIR/ios/App/App.xcodeproj"
-
-          if [ ! -d "$IOS_PROJECT" ]; then
-            echo "ERROR: $IOS_PROJECT not found."
+          if [ ! -d ios/App/App.xcodeproj ]; then
+            echo "ERROR: ios/App/App.xcodeproj not found."
             exit 1
           fi
 
-          echo "Capacitor iOS project prepared."
-
-      - name: Verify bundle identifier and scheme
+      - name: Verify bundle identifier
         script: |
           set -euo pipefail
 
           PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
           IOS_PROJECT="$PROJECT_DIR/ios/App/App.xcodeproj"
 
-          echo "Available schemes:"
-          xcodebuild -list -project "$IOS_PROJECT"
-
-          if ! xcodebuild \
+          xcodebuild \
             -showBuildSettings \
             -project "$IOS_PROJECT" \
             -scheme "$XCODE_SCHEME" \
-            2>/dev/null |
-            grep -Fq 'PRODUCT_BUNDLE_IDENTIFIER = com.ascratech.taxmate'; then
-            echo "WARNING: Verify PRODUCT_BUNDLE_IDENTIFIER in Xcode."
-            echo "Expected: com.ascratech.taxmate"
-          fi
+            | grep -E 'PRODUCT_BUNDLE_IDENTIFIER|PRODUCT_NAME' \
+            || true
+
+          echo "Expected bundle identifier: $BUNDLE_ID"
+          echo "Apple Developer account: $APPLE_DEVELOPER_EMAIL"
 
       - name: Configure iOS code signing
         script: |
@@ -147,10 +140,7 @@ workflows:
           PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
           cd "$PROJECT_DIR"
 
-          # Requires a matching development certificate and profile
-          # to be available in Codemagic Code signing identities.
-          xcode-project use-profiles \
-            --project "ios/App/App.xcodeproj"
+          xcode-project use-profiles
 
       - name: Resolve Swift dependencies
         script: |
@@ -176,4 +166,3 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
-      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
