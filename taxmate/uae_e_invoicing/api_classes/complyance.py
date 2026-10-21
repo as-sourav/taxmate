@@ -148,13 +148,18 @@ class ComplyanceAPI(BaseAPI):
 		self.environment = "sandbox" if self.sandbox_mode else "production"
 
 	def get_auth_headers(self) -> dict[str, str]:
-		"""Unify uses the API key as a bearer token, not OAuth client credentials."""
-		if not self.settings.auth_key:
+		"""Unify uses the API key as a bearer token, not OAuth client credentials.
+
+		Password fields live in ``__Auth`` and are not loaded onto the document,
+		so ``doc.auth_key`` is empty even when a key is saved.
+		"""
+		key = self.settings.get_password("auth_key", raise_exception=False)
+		if not key:
 			frappe.throw(
 				_("Set the Complyance API key in Auth Key on UAE Tax Settings."),
 				title=_("ASP Authentication Missing"),
 			)
-		return {"Authorization": f"Bearer {self.settings.get_password('auth_key')}"}
+		return {"Authorization": f"Bearer {key}"}
 
 	def get_url(self, *parts: str) -> str:
 		base = (self.settings.base_url or DEFAULT_BASE_URL).rstrip("/") + "/"
