@@ -8,6 +8,7 @@ workflows:
     environment:
       vars:
         XCODE_SCHEME: "App"
+        NODE_VERSION: "22"
 
     scripts:
       - name: Locate frontend project
@@ -19,66 +20,71 @@ workflows:
             -type f \
             -name package.json \
             -not -path '*/node_modules/*' \
-            -not -path '*/ios/App/Pods/*' \
             | head -n 1)
 
           if [ -z "$PACKAGE_FILE" ]; then
-            echo "ERROR: package.json not found."
+            echo "ERROR: package.json not found"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PACKAGE_FILE")
           echo "$PROJECT_DIR" > /tmp/frontend_project_dir.txt
 
-          echo "Frontend directory: $PROJECT_DIR"
-          ls -la "$PROJECT_DIR"
+          echo "Frontend project: $PROJECT_DIR"
 
-      - name: Check Node.js and npm
+      - name: Check build tools
         script: |
           set -e
           node --version
           npm --version
+          xcodebuild -version
+          pod --version
 
       - name: Install npm dependencies
         script: |
           set -e
-
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
           cd "$PROJECT_DIR"
 
-          if [ ! -f package-lock.json ]; then
-            echo "ERROR: package-lock.json not found."
+          test -f package-lock.json || {
+            echo "ERROR: package-lock.json is missing"
             exit 1
-          fi
+          }
 
           npm ci --no-audit --no-fund
 
       - name: Build web application
         script: |
           set -e
-
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
           cd "$PROJECT_DIR"
 
           npm run build:mobile
 
-      - name: Prepare Capacitor iOS project
+      - name: Generate iOS project
         script: |
           set -e
-
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
           cd "$PROJECT_DIR"
 
+          if [ ! -f capacitor.config.ts ] && \
+             [ ! -f capacitor.config.json ] && \
+             [ ! -f capacitor.config.js ]; then
+            echo "ERROR: Capacitor configuration file not found"
+            exit 1
+          fi
+
           if [ ! -d ios ]; then
-            echo "iOS platform directory missing. Adding Capacitor iOS..."
+            echo "Generating the iOS project..."
             npx cap add ios
+          else
+            echo "iOS project already exists; keeping existing native files"
           fi
 
           npx cap sync ios
 
           if [ ! -f ios/App/Podfile ]; then
-            echo "ERROR: ios/App/Podfile was not generated."
-            echo "Checking available Podfiles..."
+            echo "ERROR: Podfile was not generated at ios/App/Podfile"
             find ios -name Podfile -print || true
             exit 1
           fi
@@ -86,30 +92,20 @@ workflows:
       - name: Install CocoaPods dependencies
         script: |
           set -e
-
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
           cd "$PROJECT_DIR/ios/App"
 
           pod install
 
-      - name: Build iOS application
+      - name: Build iOS IPA
         script: |
           set -e
-
           PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
-
-          if [ ! -d "$PROJECT_DIR/ios/App/App.xcodeproj" ]; then
-            echo "ERROR: App.xcodeproj not found."
-            find "$PROJECT_DIR/ios" -maxdepth 4 \
-              \( -name '*.xcodeproj' -o -name '*.xcworkspace' \) -print
-            exit 1
-          fi
 
           xcode-project build-ipa \
             --project "$PROJECT_DIR/ios/App/App.xcodeproj" \
             --scheme "$XCODE_SCHEME"
 
     artifacts:
-      - "**/build/ios/ipa/*.ipa"
-      - "**/ios/App/build/**/*.ipa"
+      - "**/*.ipa"
       - /tmp/xcodebuild_logs/*.log
