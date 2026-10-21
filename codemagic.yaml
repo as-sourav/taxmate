@@ -6,10 +6,12 @@ workflows:
     instance_type: mac_mini_m2
 
     environment:
+      ios_signing:
+        distribution_type: development
+        bundle_identifier: com.yourcompany.taxmate
+
       vars:
         XCODE_SCHEME: "App"
-        BUNDLE_ID: "com.example.taxmate"
-      # Configure signing certificates in Codemagic if required.
 
     scripts:
       - name: Locate frontend project
@@ -39,7 +41,6 @@ workflows:
           node --version
           npm --version
           xcodebuild -version
-          xcode-project --version
 
       - name: Install npm dependencies
         script: |
@@ -65,7 +66,7 @@ workflows:
           npm run build:mobile
 
           if [ ! -d dist-mobile ]; then
-            echo "ERROR: dist-mobile directory not generated"
+            echo "ERROR: dist-mobile directory was not generated"
             exit 1
           fi
 
@@ -84,6 +85,7 @@ workflows:
           fi
 
           if [ ! -d ios ]; then
+            echo "Creating iOS project with Swift Package Manager"
             npx cap add ios --packagemanager SPM
           fi
 
@@ -91,11 +93,17 @@ workflows:
 
           if [ ! -d ios/App/App.xcodeproj ]; then
             echo "ERROR: ios/App/App.xcodeproj not found"
-            find ios -maxdepth 5 \
-              \( -name '*.xcodeproj' -o -name '*.xcworkspace' \) \
-              -print || true
             exit 1
           fi
+
+      - name: Configure iOS code signing
+        script: |
+          set -e
+
+          PROJECT_DIR=$(cat /tmp/frontend_project_dir.txt)
+          cd "$PROJECT_DIR"
+
+          xcode-project use-profiles
 
       - name: Resolve Swift dependencies
         script: |
@@ -108,25 +116,6 @@ workflows:
             -project "$PROJECT_DIR/ios/App/App.xcodeproj" \
             -scheme "$XCODE_SCHEME"
 
-      - name: Prepare IPA export options
-        script: |
-          set -e
-
-          cat > "$CM_BUILD_DIR/export_options.plist" <<'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>development</string>
-              <key>signingStyle</key>
-              <string>automatic</string>
-          </dict>
-          </plist>
-          PLIST
-
-          plutil -lint "$CM_BUILD_DIR/export_options.plist"
-
       - name: Build iOS IPA
         script: |
           set -e
@@ -135,8 +124,7 @@ workflows:
 
           xcode-project build-ipa \
             --project "$PROJECT_DIR/ios/App/App.xcodeproj" \
-            --scheme "$XCODE_SCHEME" \
-            --export-options-plist "$CM_BUILD_DIR/export_options.plist"
+            --scheme "$XCODE_SCHEME"
 
     artifacts:
       - build/ios/ipa/*.ipa
