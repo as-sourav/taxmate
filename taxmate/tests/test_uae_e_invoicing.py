@@ -491,6 +491,24 @@ class TestComplyanceUnify(unittest.TestCase):
 		with self.assertRaises(ComplyanceSourceError):
 			parse_complyance_source("tax mate:1.0")
 
+	def test_auth_header_reads_password_store_when_field_is_blank(self):
+		from taxmate.uae_e_invoicing.api_classes.complyance import ComplyanceAPI
+
+		class Settings:
+			auth_key = ""
+
+			def get_password(self, fieldname, raise_exception=True):
+				self.fieldname = fieldname
+				self.raise_exception = raise_exception
+				return "ak_test_key"
+
+		settings = Settings()
+		api = ComplyanceAPI.__new__(ComplyanceAPI)
+		api.settings = settings
+		self.assertEqual(api.get_auth_headers(), {"Authorization": "Bearer ak_test_key"})
+		self.assertEqual(settings.fieldname, "auth_key")
+		self.assertFalse(settings.raise_exception)
+
 	def test_states(self):
 		from taxmate.uae_e_invoicing.api_classes.complyance import taxmate_status_for_state
 
