@@ -47,16 +47,20 @@ workflows:
             exit 1
           fi
 
-          PROJECT_DIR="$(dirname "$PACKAGE_FILE")"
+          PROJECT_DIR="$(cd "$(dirname "$PACKAGE_FILE")" && pwd)"
           echo "$PROJECT_DIR" > /tmp/taxmate_project_dir.txt
+
           echo "Project directory: $PROJECT_DIR"
+          echo "Package file: $PACKAGE_FILE"
 
       - name: Check build environment
         script: |
           set -euo pipefail
+
           node --version
           npm --version
           xcodebuild -version
+          xcrun --find xcodebuild
 
       - name: Install npm dependencies
         script: |
@@ -83,8 +87,12 @@ workflows:
 
           if [ ! -d dist-mobile ]; then
             echo "ERROR: dist-mobile was not generated."
+            echo "Check the output directory configured by build:mobile."
             exit 1
           fi
+
+          echo "Web build output:"
+          ls -la dist-mobile
 
       - name: Prepare Capacitor iOS project
         script: |
@@ -100,16 +108,26 @@ workflows:
             exit 1
           fi
 
-          if [ ! -d ios ]; then
-            npx cap add ios
+          if [ ! -d ios/App/App.xcodeproj ]; then
+            echo "iOS project missing or incomplete."
+
+            if [ ! -d ios ]; then
+              npx cap add ios
+            else
+              echo "ERROR: ios directory exists but ios/App/App.xcodeproj is missing."
+              echo "Restore the iOS project or regenerate it intentionally."
+              exit 1
+            fi
           fi
 
           npx cap sync ios
 
-          if [ ! -d ios/App/App.xcodeproj ]; then
-            echo "ERROR: ios/App/App.xcodeproj not found."
-            exit 1
-          fi
+          test -d ios/App/App.xcodeproj
+
+          echo "Available Xcode schemes:"
+          xcodebuild \
+            -list \
+            -project "$PROJECT_DIR/ios/App/App.xcodeproj"
 
       - name: Configure iOS code signing
         script: |
@@ -136,11 +154,68 @@ workflows:
           set -euo pipefail
 
           PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
+          cd "$PROJECT_DIR"
+
+          mkdir -p "$CM_BUILD_DIR/ipa-output"
 
           xcode-project build-ipa \
             --project "$PROJECT_DIR/ios/App/App.xcodeproj" \
             --scheme "$XCODE_SCHEME"
 
+          echo "Searching for generated IPA..."
+
+          find "$PROJECT_DIR" \
+            -type f \
+            -name "*.ipa" \
+            -not -path '*/Pods/*' \
+            -not -path '*/node_modules/*' \
+            -print
+
+          IPA_FILE="$(find "$PROJECT_DIR/build/ios/ipa" \
+            -maxdepth 1 \
+            -type f \
+            -name "*.ipa" \
+            -print -quit 2>/dev/null || true)"
+
+          if [ -z "$IPA_FILE" ]; then
+            IPA_FILE="$(find "$PROJECT_DIR" \
+              -type f \
+              -name "*.ipa" \
+              -not -path '*/Pods/*' \
+              -not -path '*/node_modules/*' \
+              -print -quit)"
+          fi
+
+          if [ -z "$IPA_FILE" ]; then
+            echo "ERROR: IPA was not generated."
+            echo "Inspect the Xcode archive/export errors above."
+            exit 1
+          fi
+
+          cp "$IPA_FILE" "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
+
+          echo "IPA copied to:"
+          ls -lh "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
+
+      - name: Verify IPA artifact
+        script: |
+          set -euo pipefail
+
+          IPA_FILE="$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
+
+          if [ ! -s "$IPA_FILE" ]; then
+            echo "ERROR: Expected IPA artifact is missing or empty."
+            exit 1
+          fi
+
+          echo "IPA artifact verified."
+          file "$IPA_FILE"
+
+          echo "IPA archive contents:"
+          unzip -l "$IPA_FILE" | head -40
+
     artifacts:
+      - ipa-output/*.ipa
       - build/ios/ipa/*.ipa
+      - "**/*.ipa"
       - /tmp/xcodebuild_logs/*.log
