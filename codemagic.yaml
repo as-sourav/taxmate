@@ -314,9 +314,8 @@ workflows:
           unzip -l "$ZIP_FILE"
 
     artifacts:
-      - TaxMate-iOS-artifacts.zip
       - ipa-output/*.ipa
-      - "**/*.ipa"
+      - TaxMate-iOS-artifacts.zip
       - /tmp/xcodebuild_logs/*.log
 
     publishing:
