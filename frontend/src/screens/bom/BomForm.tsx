@@ -132,7 +132,7 @@ export default function BomForm() {
         await update.updateDoc(DT.bom, name, payload);
         n = name;
       }
-      if (andSubmit) await submitCall.call({ doctype: DT.bom, name: n });
+      if (andSubmit) await submitCall.call({ doc: { doctype: DT.bom, name: n } });
       nav(`/boms/${encodeURIComponent(n)}`);
     } catch (err) { setSaveError(err); }
     finally { setBusy(false); }

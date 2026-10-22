@@ -7,6 +7,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { confirmCancel } from "../../lib/workflow";
 import { useDeleteDraftAction } from "../../lib/useDraftDelete";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
@@ -29,6 +30,7 @@ export default function StockReconciliationDetail() {
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.stockReconciliation, name);
   const submitCall = useFrappePostCall(METHOD.submit);
   const cancelCall = useFrappePostCall(METHOD.cancel);
+  const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
   const canSubmit = canSubmitSales(session.roles);
   const canCancel = canCancelSales(session.roles);
 
@@ -68,14 +70,27 @@ export default function StockReconciliationDetail() {
             )}
             {draft && canSubmit && (
               <button type="button" className="btn" disabled={submitCall.loading}
-                onClick={() => void submitCall.call({ doc: { doctype: DT.stockReconciliation, name } }).then(() => mutate())}>
+                onClick={() => void submitCall.call({ doc: { doctype: DT.stockReconciliation, name } }).then(() => mutate()).catch(() => undefined)}>
                 {t("inv.submit")}
               </button>
             )}
             {submitted && canCancel && (
               <button type="button" className="btn quiet" disabled={cancelCall.loading}
-                onClick={() => void cancelCall.call({ doctype: DT.stockReconciliation, name }).then(() => mutate())}>
+                onClick={() => {
+                  if (!confirmCancel(name)) return;
+                  void cancelCall.call({ doctype: DT.stockReconciliation, name }).then(() => mutate()).catch(() => undefined);
+                }}>
                 {t("inv.cancel")}
+              </button>
+            )}
+            {data.docstatus === 2 && canSubmit && (
+              <button type="button" className="btn ghost" disabled={amendCall.loading}
+                onClick={() => void amendCall.call({ doctype: DT.stockReconciliation, name }).then((res) => {
+                  const next = res?.message?.name;
+                  if (next) nav(`/stock-reconciliations/${encodeURIComponent(next)}`);
+                  else mutate();
+                }).catch(() => undefined)}>
+                {amendCall.loading ? t("soc.saving") : t("inv.amend")}
               </button>
             )}
           </>
@@ -87,8 +102,8 @@ export default function StockReconciliationDetail() {
         </p>
       </PageHead>
 
-      {(submitCall.error || cancelCall.error) && (
-        <ErrorBox error={submitCall.error || cancelCall.error} />
+      {(submitCall.error || cancelCall.error || amendCall.error) && (
+        <ErrorBox error={submitCall.error || cancelCall.error || amendCall.error} />
       )}
 
       <FormLayout>

@@ -8,7 +8,7 @@ import type { SalesOrder, SalesOrderItem } from "../../types/erpnext";
 import { DT, METHOD } from "../../lib/frappe";
 import { useDoc, useInsert } from "../../lib/resource";
 import { useSession } from "../../lib/session";
-import { canCancelSales, canSubmitSales } from "../../lib/roles";
+import { canCancelSales, canSubmitSales, canWrite } from "../../lib/roles";
 import { date, money, pct, qty } from "../../lib/format";
 import { SO_PILL_CLASS, isLate, toUiStatus } from "../../lib/status";
 import { t } from "../../i18n/strings";
@@ -120,7 +120,7 @@ export default function SalesOrderDetail() {
             cancelled={data.docstatus === 2}
             canSubmit={canSubmit}
             canCancel={canCancel}
-            canWrite={true}
+            canWrite={canWrite(session)}
             busy={submitCall.loading || cancelCall.loading || amendCall.loading || !!busy || deleteAction.loading}
             onEdit={() => nav(`/orders/${encodeURIComponent(name)}/edit`)}
             onSubmit={() => void submitCall.call({ doc: { doctype: DT.salesOrder, name } }).then(() => mutate())}
@@ -171,7 +171,7 @@ export default function SalesOrderDetail() {
       </PageHead>
 
       {(mapError || makeDn.error || makeSi.error) && (
-        <ErrorBox error={mapError ?? makeDn.error ?? makeSi.error} />
+        <ErrorBox error={submitCall.error ?? cancelCall.error ?? amendCall.error ?? mapError ?? makeDn.error ?? makeSi.error} />
       )}
 
       <Card bodyClass="steps">

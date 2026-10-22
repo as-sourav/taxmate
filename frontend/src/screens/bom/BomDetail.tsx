@@ -3,25 +3,31 @@
  * Callers: App.tsx /boms/:name
  */
 import { useNavigate, useParams } from "react-router-dom";
+import { useFrappePostCall } from "frappe-react-sdk";
 
-import { DT } from "../../lib/frappe";
+import { DT, METHOD } from "../../lib/frappe";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
-import { canWrite } from "../../lib/roles";
+import { canCancelSales, canSubmitSales, canWrite } from "../../lib/roles";
 import { t } from "../../i18n/strings";
 import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow } from "../../components/ui";
-import DocHistory from "../../components/DocHistory";
+import DetailActions from "../../components/DetailActions";
+import { useDeleteDraftAction } from "../../lib/useDraftDelete";
 import LineItems, { type LineField } from "../../components/LineItems";
 
 type BomItem = { item_code?: string; item_name?: string; qty?: number; uom?: string; rate?: number; amount?: number };
-type Doc = { name: string; item?: string; item_name?: string; quantity?: number; is_active?: number; is_default?: number; items?: BomItem[] };
+type Doc = { name: string; item?: string; item_name?: string; quantity?: number; is_active?: number; is_default?: number; docstatus?: number; items?: BomItem[] };
 
 export default function BomDetail() {
   const { name = "" } = useParams();
   const nav = useNavigate();
   const session = useSession();
   const writable = canWrite(session);
+  const deleteAction = useDeleteDraftAction({ doctype: DT.bom, name, listPath: "/boms" });
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.bom, name);
+  const submitCall = useFrappePostCall(METHOD.submit);
+  const cancelCall = useFrappePostCall(METHOD.cancel);
+  const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
 
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={() => mutate()} />;
@@ -32,17 +38,42 @@ export default function BomDetail() {
       <PageHead
         eyebrow={<button type="button" className="btn quiet" onClick={() => nav("/boms")}>{t("bom.title")}</button>}
         title={data.name}
-        actions={<>
-            <DocHistory doctype={DT.bom} name={name} />
-            {writable ? (
-          <button type="button" className="btn ghost" onClick={() => nav(`/boms/${encodeURIComponent(name)}/edit`)}>{t("edit")}</button>
-        ) : null}
-          </>}
+        actions={
+          <DetailActions
+            doctype={DT.bom}
+            name={name}
+            draft={data.docstatus === 0}
+            submitted={data.docstatus === 1}
+            cancelled={data.docstatus === 2}
+            canWrite={writable}
+            canSubmit={canSubmitSales(session.roles)}
+            canCancel={canCancelSales(session.roles)}
+            busy={submitCall.loading || cancelCall.loading || amendCall.loading || deleteAction.loading}
+            onEdit={() => nav(`/boms/${encodeURIComponent(name)}/edit`)}
+            onSubmit={() => {
+              void submitCall.call({ doc: { doctype: DT.bom, name } }).then(() => mutate()).catch(() => undefined);
+            }}
+            onDelete={deleteAction.onDelete}
+            onCancel={() => {
+              void cancelCall.call({ doctype: DT.bom, name }).then(() => mutate()).catch(() => undefined);
+            }}
+            onAmend={() => {
+              void amendCall.call({ doctype: DT.bom, name }).then((res) => {
+                const next = res?.message?.name;
+                if (next) nav(`/boms/${encodeURIComponent(next)}`);
+                else mutate();
+              }).catch(() => undefined);
+            }}
+          />
+        }
       >
         <p className="sub" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 7 }}>
           {data.is_active ? <Pill cls="p-done">{t("bom.activeLabel")}</Pill> : <Pill cls="p-flat">{t("no")}</Pill>}
         </p>
       </PageHead>
+      {(submitCall.error || cancelCall.error || amendCall.error || deleteAction.error) && (
+        <ErrorBox error={submitCall.error || cancelCall.error || amendCall.error || deleteAction.error} />
+      )}
       <Card>
         <div className="fg">
           <ReadRow k={t("bom.col.item")} v={data.item_name || data.item || "—"} />

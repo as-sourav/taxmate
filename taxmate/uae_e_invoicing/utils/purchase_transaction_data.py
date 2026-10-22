@@ -18,6 +18,8 @@ from taxmate.uae_e_invoicing.utils.pint_ae import build_payload_from_data
 from taxmate.uae_e_invoicing.utils.transaction_data import (
 	UAETransactionData,
 	buyer_fz_validation_messages,
+	credit_note_reason_validation_messages,
+	licence_authority_validation_messages,
 )
 
 
@@ -57,6 +59,7 @@ class UAEPurchaseTransactionData(UAETransactionData):
 				party.get("legal_registration_identifier_type") if party else None
 			),
 			"legal_registration_identifier": (party.get("legal_registration_identifier") if party else None),
+			"licence_authority": party.get("uae_licence_authority") if party else None,
 			"address": address,
 			"contact": {
 				"name": self.doc.get("contact_display") or self.doc.supplier_name,
@@ -81,6 +84,7 @@ class UAEPurchaseTransactionData(UAETransactionData):
 			"trade_license_number": self.company.get("trade_license_number"),
 			"legal_registration_identifier_type": self.company.get("legal_registration_identifier_type"),
 			"legal_registration_identifier": self.company.get("legal_registration_identifier"),
+			"licence_authority": self.company.get("uae_licence_authority"),
 			"address": address,
 			"contact": {
 				"name": self.company.company_name,
@@ -107,7 +111,9 @@ class UAEPurchaseTransactionData(UAETransactionData):
 				_("Supplier must have a TRN or Trade License Number for self-billed invoices.")
 			)
 		elif supplier["trn"] and not is_valid_uae_trn(supplier["trn"]):
-			self.errors.append(_("Supplier TRN must be a valid 15-digit UAE TRN."))
+			self.errors.append(
+				_("Supplier TRN must be 15 digits, starting with 1 and ending with 03 (IBR-132-AE).")
+			)
 
 		if not supplier["peppol_id"]:
 			self.errors.append(
@@ -131,6 +137,12 @@ class UAEPurchaseTransactionData(UAETransactionData):
 		self.errors.extend(
 			buyer_fz_validation_messages(self.get_transaction_flags(), customer.get("fz_beneficiary_id"))
 		)
+		self.errors.extend(
+			licence_authority_validation_messages(_("Supplier"), supplier, "IBR-172-AE")
+		)
+		self.errors.extend(
+			licence_authority_validation_messages(_("Company"), customer, "IBR-191-AE")
+		)
 
 	def _check_credit_note(self):
 		if not self.doc.get("is_return"):
@@ -139,6 +151,9 @@ class UAEPurchaseTransactionData(UAETransactionData):
 			self.errors.append(
 				_("Self-billed credit notes must reference the original invoice (Return Against).")
 			)
+		self.errors.extend(
+			credit_note_reason_validation_messages(True, self.doc.get("uae_credit_note_reason"))
+		)
 
 	def _get_credit_note_details(self) -> dict[str, Any] | None:
 		if not self.doc.get("is_return"):

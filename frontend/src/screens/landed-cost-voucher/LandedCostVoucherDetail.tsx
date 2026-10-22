@@ -8,7 +8,7 @@ import { useFrappePostCall } from "frappe-react-sdk";
 import { DT, METHOD } from "../../lib/frappe";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
-import { canSubmitSales, canWrite } from "../../lib/roles";
+import { canCancelSales, canSubmitSales, canWrite } from "../../lib/roles";
 import { t } from "../../i18n/strings";
 import { Card, Loading, ErrorBox, PageHead, Pill } from "../../components/ui";
 import { money } from "../../lib/format";
@@ -24,6 +24,7 @@ export default function LandedCostVoucherDetail() {
   const doc = useDoc<Record<string, unknown>>(DT.landedCostVoucher, name, name);
   const submitCall = useFrappePostCall(METHOD.submit);
   const cancelCall = useFrappePostCall(METHOD.cancel);
+  const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
 
@@ -34,13 +35,27 @@ export default function LandedCostVoucherDetail() {
   const isDraft = docstatus === 0;
   const isSubmitted = docstatus === 1;
   const canSubmitDoc = canSubmitSales(session.roles);
+  const canCancelDoc = canCancelSales(session.roles);
 
   async function doAction(action: "submit" | "cancel") {
     setBusy(true); setErr(null);
     try {
-      const call = action === "submit" ? submitCall : cancelCall;
-      await call.call({ doc: { doctype: DT.landedCostVoucher, name } });
+      if (action === "submit") {
+        await submitCall.call({ doc: { doctype: DT.landedCostVoucher, name } });
+      } else {
+        await cancelCall.call({ doctype: DT.landedCostVoucher, name });
+      }
       await doc.mutate();
+    } catch (e) { setErr(e); } finally { setBusy(false); }
+  }
+
+  async function amend() {
+    setBusy(true); setErr(null);
+    try {
+      const res = await amendCall.call({ doctype: DT.landedCostVoucher, name });
+      const next = res?.message?.name;
+      if (next) nav(`/landed-cost-vouchers/${encodeURIComponent(next)}`);
+      else await doc.mutate();
     } catch (e) { setErr(e); } finally { setBusy(false); }
   }
 
@@ -67,11 +82,12 @@ export default function LandedCostVoucherDetail() {
               cancelled={docstatus === 2}
               canWrite={canWrite(session)}
               canSubmit={canSubmitDoc}
-              canCancel={canSubmitDoc}
+              canCancel={canCancelDoc}
               onEdit={isDraft ? () => nav(`/landed-cost-vouchers/${encodeURIComponent(name)}/edit`) : undefined}
               onSubmit={isDraft ? () => doAction("submit") : undefined}
             onDelete={deleteAction.onDelete}
               onCancel={isSubmitted ? () => doAction("cancel") : undefined}
+              onAmend={docstatus === 2 ? amend : undefined}
               busy={busy || deleteAction.loading}
             />
           </>

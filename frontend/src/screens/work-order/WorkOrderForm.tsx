@@ -101,7 +101,7 @@ export default function WorkOrderForm() {
         await update.updateDoc(DT.workOrder, name, payload);
         n = name;
       }
-      if (andSubmit) await submitCall.call({ doctype: DT.workOrder, name: n });
+      if (andSubmit) await submitCall.call({ doc: { doctype: DT.workOrder, name: n } });
       nav(`/work-orders/${encodeURIComponent(n)}`);
     } catch (err) { setSaveError(err); }
     finally { setBusy(false); }

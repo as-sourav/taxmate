@@ -9,6 +9,8 @@ import { useNavigate, useParams } from "react-router-dom";
 
 import { DT } from "../../lib/frappe";
 import { useDoc } from "../../lib/resource";
+import { useSession } from "../../lib/session";
+import { canWrite } from "../../lib/roles";
 import { date } from "../../lib/format";
 import { t } from "../../i18n/strings";
 import { Card, ErrorBox, Loading, PageHead, ReadRow } from "../../components/ui";
@@ -27,6 +29,7 @@ type Doc = {
 export default function LoyaltyProgramDetail() {
   const { name = "" } = useParams();
   const nav = useNavigate();
+  const session = useSession();
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.loyaltyProgram, name);
 
   if (isLoading) return <Loading />;
@@ -46,7 +49,7 @@ export default function LoyaltyProgramDetail() {
             submitted={false}
             canSubmit={false}
             canCancel={false}
-            canWrite={true}
+            canWrite={canWrite(session)}
             onEdit={() => nav(`/loyalty-programs/${encodeURIComponent(name)}/edit`)}
             busy={false}
           />

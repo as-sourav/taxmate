@@ -8,7 +8,8 @@ import { DT, METHOD } from "../../lib/frappe";
 import { useDeleteDraftAction } from "../../lib/useDraftDelete";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
-import { canSubmitSales } from "../../lib/roles";
+import { canCancelSales, canSubmitSales } from "../../lib/roles";
+import { confirmCancel } from "../../lib/workflow";
 import { date, money } from "../../lib/format";
 import { t } from "../../i18n/strings";
 import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow, SumRow } from "../../components/ui";
@@ -66,6 +67,8 @@ export default function Vat201Detail() {
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.vat201, name);
   const generate = useFrappePostCall(METHOD.generateVat201);
   const submitCall = useFrappePostCall(METHOD.submit);
+  const cancelCall = useFrappePostCall(METHOD.cancel);
+  const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
 
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={() => mutate()} />;
@@ -74,8 +77,9 @@ export default function Vat201Detail() {
   const cur = data.tax_currency || session.currency || "";
   const draft = data.docstatus === 0;
   const canSubmit = canSubmitSales(session.roles);
+  const canCancel = canCancelSales(session.roles);
   const boxes = data.boxes ?? [];
-  const busyError = generate.error || submitCall.error;
+  const busyError = generate.error || submitCall.error || cancelCall.error || amendCall.error;
 
   async function regenerate() {
     await generate.call({ name });
@@ -109,8 +113,27 @@ export default function Vat201Detail() {
             )}
             {draft && canSubmit && (
               <button type="button" className="btn" disabled={submitCall.loading}
-                onClick={() => void submitCall.call({ doc: { doctype: DT.vat201, name } }).then(() => mutate())}>
+                onClick={() => void submitCall.call({ doc: { doctype: DT.vat201, name } }).then(() => mutate()).catch(() => undefined)}>
                 {t("inv.submit")}
+              </button>
+            )}
+            {data.docstatus === 1 && canCancel && (
+              <button type="button" className="btn quiet" disabled={cancelCall.loading}
+                onClick={() => {
+                  if (!confirmCancel(name)) return;
+                  void cancelCall.call({ doctype: DT.vat201, name }).then(() => mutate()).catch(() => undefined);
+                }}>
+                {t("inv.cancel")}
+              </button>
+            )}
+            {data.docstatus === 2 && canSubmit && (
+              <button type="button" className="btn ghost" disabled={amendCall.loading}
+                onClick={() => void amendCall.call({ doctype: DT.vat201, name }).then((res) => {
+                  const next = res?.message?.name;
+                  if (next) nav(`/vat-201/${encodeURIComponent(next)}`);
+                  else mutate();
+                }).catch(() => undefined)}>
+                {amendCall.loading ? t("soc.saving") : t("inv.amend")}
               </button>
             )}
           </>

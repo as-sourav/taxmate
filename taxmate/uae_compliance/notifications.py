@@ -60,10 +60,7 @@ def _remind_ubo_changes() -> None:
 		_raise_todo_once(
 			reference_doctype="UAE UBO Register",
 			reference_name=register.name,
-			description=_(
-				"UBO change reporting is {0} for {1}. Review the Change Log and report to your "
-				"licensing authority."
-			).format(register.status, register.company),
+			description=ubo_reminder_text(register.status, register.company),
 		)
 
 
@@ -77,10 +74,21 @@ def _remind_esr_filings() -> None:
 		_raise_todo_once(
 			reference_doctype="UAE ESR Filing",
 			reference_name=filing.name,
-			description=_("ESR filing for {0} (financial year ending {1}) is {2}.").format(
-				filing.company, filing.financial_year_end, filing.status
-			),
+			description=esr_reminder_text(filing.company, filing.financial_year_end, filing.status),
 		)
+
+
+def ubo_reminder_text(status, company) -> str:
+	return _(
+		"UBO change reporting is {0} for {1}. Review the Change Log and report to your "
+		"licensing authority."
+	).format(_(status), company)
+
+
+def esr_reminder_text(company, financial_year_end, status) -> str:
+	return _("ESR filing for {0} (financial year ending {1}) is {2}.").format(
+		company, financial_year_end, _(status)
+	)
 
 
 def _raise_todo_once(reference_doctype: str, reference_name: str, description: str) -> None:

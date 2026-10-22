@@ -55,6 +55,7 @@ export default function PickListDetail() {
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.pickList, name);
   const submitCall = useFrappePostCall(METHOD.submit);
   const cancelCall = useFrappePostCall(METHOD.cancel);
+  const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
   const locationsCall = useFrappePostCall(METHOD.setPickListItemLocations);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<unknown>(null);
@@ -67,6 +68,7 @@ export default function PickListDetail() {
 
   const draft = data.docstatus === 0;
   const submitted = data.docstatus === 1;
+  const cancelled = data.docstatus === 2;
 
   async function handleSubmit() {
     setBusy(true); setActionError(null);
@@ -81,6 +83,16 @@ export default function PickListDetail() {
     try {
       await cancelCall.call({ doctype: DT.pickList, name });
       mutate();
+    } catch (e) { setActionError(e); } finally { setBusy(false); }
+  }
+
+  async function handleAmend() {
+    setBusy(true); setActionError(null);
+    try {
+      const res = await amendCall.call({ doctype: DT.pickList, name });
+      const next = res?.message?.name;
+      if (next) nav(`/pick-lists/${encodeURIComponent(next)}`);
+      else mutate();
     } catch (e) { setActionError(e); } finally { setBusy(false); }
   }
 
@@ -103,6 +115,7 @@ export default function PickListDetail() {
             name={name}
             draft={draft}
             submitted={submitted}
+            cancelled={cancelled}
             canSubmit={canSubmit}
             canCancel={canCancel}
             canWrite={canSubmit}
@@ -110,6 +123,7 @@ export default function PickListDetail() {
             onSubmit={handleSubmit}
             onDelete={deleteAction.onDelete}
             onCancel={handleCancel}
+            onAmend={handleAmend}
             busy={busy || deleteAction.loading}
           />
         }

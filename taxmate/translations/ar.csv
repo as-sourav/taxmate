@@ -304,3 +304,20 @@ Cost Of Goods Sold,تكلفة البضاعة المباعة
 Inventory,المخزون
 Stock in Hand,المخزون المتاح
 Stock In Hand,المخزون المتاح
+Due,مستحق
+Overdue,متأخر
+Notification Due,موعد الإخطار
+Report Due,موعد التقرير
+Update Reporting Due,موعد الإبلاغ عن التحديث
+VAT 201 for {0} (period ending {1}) is {2}. Due {3}. Prepare the accountant pack and file in EmaraTax; submitting the log does not e-file.,إقرار ضريبة القيمة المضافة 201 لـ {0} (الفترة المنتهية في {1}) حالته {2}. آخر موعد للتقديم {3}. جهّز حزمة المحاسب وقدّمها في إماراتكس. حفظ السجل هنا لا يُرسل الإقرار إلى الهيئة.
+Corporate Tax for {0} (period ending {1}) is {2}. Due {3}. Prepare the accountant pack and file on the FTA portal; submitting the log does not e-file.,ضريبة الشركات لـ {0} (الفترة المنتهية في {1}) حالتها {2}. آخر موعد للتقديم {3}. جهّز حزمة المحاسب وقدّمها في بوابة الهيئة. حفظ السجل هنا لا يُرسل الإقرار إلى الهيئة.
+ESR filing for {0} (financial year ending {1}) is {2}.,تقديم الجوهر الاقتصادي لـ {0} (السنة المالية المنتهية في {1}) حالته {2}.
+UBO change reporting is {0} for {1}. Review the Change Log and report to your licensing authority.,الإبلاغ عن تغيير المالك المستفيد حالته {0} لـ {1}. راجع سجل التغييرات وأبلغ جهة الترخيص.
+{0} has no e-invoicing cohort yet. Enter last accounting-period financial-statement revenue (MD 244) or set a cohort override. TaxMate does not classify Large vs SME from the general ledger.,ليس لدى {0} فئة فوترة إلكترونية بعد. أدخل إيراد آخر قوائم مالية للفترة المحاسبية (القرار الوزاري 244) أو حدّد الفئة يدوياً. لا يصنّف تاكس ميت المنشأة الكبيرة أو الصغيرة من دفتر الأستاذ.
+{0}'s ASP-appointment deadline for the {1} e-invoicing cohort ({2}) has passed and e-invoicing is not yet enabled.,انتهى موعد تعيين مزود الفوترة لفئة {1} لدى {0} ({2}) ولم تُفعّل الفوترة الإلكترونية بعد.
+{0} is in the {1} e-invoicing cohort — appoint an ASP before {2} ({3} day(s) left).,{0} ضمن فئة الفوترة الإلكترونية {1}. عيّن مزود فوترة قبل {2} (متبقٍ {3} يوم).
+Mandatory e-invoicing for the {0} cohort is live from {1} and e-invoicing is not yet enabled on {2}.,الفوترة الإلكترونية الإلزامية لفئة {0} سارية من {1} ولم تُفعّل بعد على {2}.
+Mandatory e-invoicing for the {0} cohort goes live on {1} ({2} day(s) left).,تبدأ الفوترة الإلكترونية الإلزامية لفئة {0} في {1} (متبقٍ {2} يوم).
+E-invoice {0} for {1} is past the {2}-day transmission SLA (due {3}).,تجاوزت الفاتورة الإلكترونية {0} لـ {1} مهلة الإرسال البالغة {2} يوماً (الاستحقاق {3}).
+E-invoice downtime for {0} must be reported to the FTA (due {1}).,يجب إبلاغ الهيئة بانقطاع الفوترة الإلكترونية لدى {0} (الاستحقاق {1}).
+"Dates follow Ministerial Decision 244/2025 as amended by Resolution 66/2026 (Large ASP appointment 30 Oct 2026). Confirm this company's cohort with the ASP or FTA — this is not legal or tax advice. Classification uses the revenue band you enter from the last accounting-period financial statements, not TaxMate's general ledger.",التواريخ وفق القرار الوزاري 244 لسنة 2025 المعدّل بالقرار 66 لسنة 2026 (موعد تعيين مزود الفوترة للمنشآت الكبيرة 30 أكتوبر 2026). أكّد فئة هذه الشركة مع مزود الفوترة أو الهيئة. هذا ليس استشارة قانونية أو ضريبية. التصنيف يعتمد شريحة الإيراد التي تدخلها من آخر قوائم مالية، لا من دفتر الأستاذ في تاكس ميت.
