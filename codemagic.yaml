@@ -1,11 +1,9 @@
+
 workflows:
   capacitor-ios:
     name: TaxMate iOS Development Build
     max_build_duration: 120
     instance_type: mac_mini_m2
-
-    integrations:
-      app_store_connect: taxmate-app-store-connect
 
     environment:
       ios_signing:
@@ -15,7 +13,6 @@ workflows:
       vars:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "com.ascratech.taxmate"
-        PROVISIONING_PROFILE_NAME: "taxmate"
 
       node: latest
       xcode: latest
@@ -121,7 +118,6 @@ workflows:
           PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
           cd "$PROJECT_DIR"
 
-          # Uses signing assets configured in Codemagic.
           xcode-project use-profiles
 
       - name: Resolve Swift dependencies
