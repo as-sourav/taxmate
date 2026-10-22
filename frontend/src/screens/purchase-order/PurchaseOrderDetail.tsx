@@ -161,7 +161,7 @@ export default function PurchaseOrderDetail() {
       </PageHead>
 
       {(mapError || makePr.error || makePi.error) && (
-        <ErrorBox error={mapError ?? makePr.error ?? makePi.error} />
+        <ErrorBox error={submitCall.error ?? cancelCall.error ?? amendCall.error ?? mapError ?? makePr.error ?? makePi.error} />
       )}
 
       <FormLayout

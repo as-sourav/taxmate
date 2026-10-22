@@ -58,6 +58,7 @@ export default function StockEntryDetail() {
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.stockEntry, name);
   const submitCall = useFrappePostCall(METHOD.submit);
   const cancelCall = useFrappePostCall(METHOD.cancel);
+  const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
   const canSubmit = canSubmitSales(session.roles);
   const canCancel = canCancelSales(session.roles);
 
@@ -69,7 +70,7 @@ export default function StockEntryDetail() {
   const submitted = data.docstatus === 1;
   const cancelled = data.docstatus === 2;
   const writable = canWrite(session);
-  const busy = submitCall.loading || cancelCall.loading;
+  const busy = submitCall.loading || cancelCall.loading || amendCall.loading;
   const total = data.total_amount
     ?? (data.items ?? []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
 
@@ -94,9 +95,20 @@ export default function StockEntryDetail() {
             canWrite={writable}
             busy={busy || deleteAction.loading}
             onEdit={() => nav(`/stock-entries/${encodeURIComponent(name)}/edit`)}
-            onSubmit={() => void submitCall.call({ doc: { doctype: DT.stockEntry, name } }).then(() => mutate())}
+            onSubmit={() => {
+              void submitCall.call({ doc: { doctype: DT.stockEntry, name } }).then(() => mutate()).catch(() => undefined);
+            }}
             onDelete={deleteAction.onDelete}
-            onCancel={() => void cancelCall.call({ doctype: DT.stockEntry, name }).then(() => mutate())}
+            onCancel={() => {
+              void cancelCall.call({ doctype: DT.stockEntry, name }).then(() => mutate()).catch(() => undefined);
+            }}
+            onAmend={() => {
+              void amendCall.call({ doctype: DT.stockEntry, name }).then((res) => {
+                const next = res?.message?.name;
+                if (next) nav(`/stock-entries/${encodeURIComponent(next)}`);
+                else mutate();
+              }).catch(() => undefined);
+            }}
           />
         }
       >
@@ -106,8 +118,8 @@ export default function StockEntryDetail() {
         </p>
       </PageHead>
 
-      {(submitCall.error || cancelCall.error) && (
-        <ErrorBox error={submitCall.error || cancelCall.error} />
+      {(submitCall.error || cancelCall.error || amendCall.error) && (
+        <ErrorBox error={submitCall.error || cancelCall.error || amendCall.error} />
       )}
 
       <FormLayout aside={

@@ -30,8 +30,10 @@ from taxmate.uae_e_invoicing.constants import (
 	ITEM_TYPE_BOTH,
 	ITEM_TYPE_GOODS,
 	ITEM_TYPE_SERVICE,
+	RCM_TYPE_CODES,
 	TRANSACTION_TYPE_FLAGS,
 	VAT_CATEGORY_CODES,
+	credit_note_reason_code,
 )
 from taxmate.uae_e_invoicing.utils.rounding import r2, r6, to_decimal
 
@@ -81,6 +83,80 @@ def invoice_period_validation_messages(
 	return msgs
 
 
+_REGISTRATION_TYPES_WITHOUT_AUTHORITY = {
+	"EID",
+	"PAS",
+	"CD",
+	"Emirates ID",
+	"Passport",
+	"Cabinet decision",
+}
+
+# ISO 6523 ICD 0160 (GS1 GTIN). IBR-CL-21 rejects scheme HS on this identifier.
+_GTIN_LENGTHS = (8, 12, 13, 14)
+STANDARD_ITEM_SCHEME_GTIN = "0160"
+
+
+def gtin_barcode(raw: str | None) -> str | None:
+	"""Return a GTIN barcode, or None when the value is not an 8/12/13/14 digit code."""
+	code = (raw or "").strip()
+	if code.isdigit() and len(code) in _GTIN_LENGTHS:
+		return code
+	return None
+
+
+def credit_note_reason_validation_messages(is_return: int | bool, reason: str | None) -> list[str]:
+	"""BTAE-03: the e-invoice reason must be a GETS credit-note code."""
+	if not is_return:
+		return []
+	if credit_note_reason_code(reason):
+		return []
+	return [
+		_(
+			"UAE Credit Note Reason must be an FTA code (BTAE-03): SUPPLY_CANCELLED, "
+			"TAX_TREATMENT_CHANGED, CONSIDERATION_ALTERED, GOODS_OR_SERVICES_RETURNED, "
+			"TAX_APPLIED_IN_ERROR, or VOLUME_DISCOUNT."
+		)
+	]
+
+
+def principal_trn_validation_messages(
+	flags: dict[str, bool], principal: str | None, seller_trn: str | None
+) -> list[str]:
+	"""BTAE-14 / IBR-137-AE / IBR-176-AE. Only disclosed-agent invoices carry a principal."""
+	if not flags.get("disclosed_agent_billing"):
+		return []
+	value = (principal or "").strip()
+	if not value:
+		return [_("Disclosed-agent invoices require the principal TRN (BTAE-14).")]
+	if not is_valid_uae_trn(value):
+		return [
+			_("Principal TRN must be 15 digits, starting with 1 and ending with 03 (IBR-132-AE).")
+		]
+	if seller_trn and value == str(seller_trn).strip():
+		return [_("Principal TRN must differ from the seller TRN (IBR-176-AE).")]
+	return []
+
+
+def licence_authority_validation_messages(party_label: str, party: dict[str, Any], rule: str) -> list[str]:
+	"""IBR-172-AE / IBR-191-AE: a trade licence needs the issuing authority name."""
+	legal_id = (
+		party.get("legal_registration_identifier") or party.get("trade_license_number") or ""
+	).strip()
+	if not legal_id:
+		return []
+	kind = (party.get("legal_registration_identifier_type") or "").strip()
+	if kind in _REGISTRATION_TYPES_WITHOUT_AUTHORITY:
+		return []
+	if (party.get("licence_authority") or "").strip():
+		return []
+	return [
+		_("{0} licence authority is required when the registration type is a trade licence ({1}).").format(
+			party_label, rule
+		)
+	]
+
+
 def buyer_fz_validation_messages(flags: dict[str, bool], fz_beneficiary_id: str | None) -> list[str]:
 	"""BTAE-01 / IBR-007-ae: FZ ID lives on the buyer (Customer, or Company when self-billed)."""
 	if flags.get("free_trade_zone") and not (fz_beneficiary_id or "").strip():
@@ -112,6 +188,7 @@ class UAETransactionData:
 		self._check_company()
 		self._check_currency()
 		self._check_parties()
+		self._check_disclosed_agent()
 		self._check_lines()
 		self._check_credit_note()
 		self._check_due_date()
@@ -147,6 +224,7 @@ class UAETransactionData:
 			"transaction_type_code": self.get_transaction_type_code(),
 			"transaction_flags": self.get_transaction_flags(),
 			"credit_note": self._get_credit_note_details(),
+			"principal_trn": self._principal_trn(),
 			"invoice_period": self._get_invoice_period(),
 			# BT-7 equals the issue date in ERPNext; PINT-AE wants it only when different
 			"tax_point_date": None,
@@ -232,6 +310,20 @@ class UAETransactionData:
 			"reason": self.doc.get("uae_credit_note_reason"),
 		}
 
+	def _principal_trn(self) -> str | None:
+		if not self.get_transaction_flags().get("disclosed_agent_billing"):
+			return None
+		return (self.doc.get("uae_principal_trn") or "").strip() or None
+
+	def _check_disclosed_agent(self):
+		self.errors.extend(
+			principal_trn_validation_messages(
+				self.get_transaction_flags(),
+				self.doc.get("uae_principal_trn"),
+				self._get_supplier().get("trn"),
+			)
+		)
+
 	def _get_notes(self) -> list[str]:
 		"""IBT-022 invoice note — required when billing frequency is OTH."""
 		remarks = (self.doc.get("remarks") or "").strip()
@@ -307,6 +399,7 @@ class UAETransactionData:
 			"trade_license_number": self.company.get("trade_license_number"),
 			"legal_registration_identifier_type": self.company.get("legal_registration_identifier_type"),
 			"legal_registration_identifier": self.company.get("legal_registration_identifier"),
+			"licence_authority": self.company.get("uae_licence_authority"),
 			"address": address,
 			"contact": {
 				"name": self.company.company_name,
@@ -336,6 +429,7 @@ class UAETransactionData:
 				party.get("legal_registration_identifier_type") if party else None
 			),
 			"legal_registration_identifier": (party.get("legal_registration_identifier") if party else None),
+			"licence_authority": party.get("uae_licence_authority") if party else None,
 			"address": address,
 			"contact": {
 				"name": self.doc.get("contact_display") or self.doc.customer_name,
@@ -407,6 +501,7 @@ class UAETransactionData:
 			)
 
 			tax_rate, tax_amount = self._get_line_tax(row, item_wise_tax, taxable_net)
+			gtin = self._gtin_by_item().get(row.item_code) if row.item_code else None
 			# N (margin scheme): VAT is due on the margin and must not be
 			# disclosed per line to the buyer
 			if category_code in ("Z", "E", "O", "AE", "N"):
@@ -444,9 +539,32 @@ class UAETransactionData:
 					"base_tax_amount": r2(abs(tax_amount) * conversion),
 					"exemption_reason": exemption_reason,
 					"rcm_nature": rcm_nature,
+					"standard_item_id": gtin,
+					"standard_item_scheme": STANDARD_ITEM_SCHEME_GTIN if gtin else None,
 				}
 			)
 		return lines
+
+	def _gtin_by_item(self) -> dict[str, str]:
+		"""First GTIN barcode on each item. HS codes are not used here (IBR-CL-21)."""
+		cached = getattr(self, "_gtin_cache", None)
+		if cached is not None:
+			return cached
+		codes = list({row.item_code for row in (self.doc.items or []) if row.get("item_code")})
+		found: dict[str, str] = {}
+		if codes:
+			for row in frappe.get_all(
+				"Item Barcode",
+				filters={"parent": ["in", codes], "parenttype": "Item"},
+				fields=["parent", "barcode"],
+			):
+				if row.parent in found:
+					continue
+				code = gtin_barcode(row.barcode)
+				if code:
+					found[row.parent] = code
+		self._gtin_cache = found
+		return found
 
 	def _get_line_vat_meta(self, row) -> tuple[str | None, str | None, str | None]:
 		"""VAT category label + exemption/RCM metadata from the Item Tax Template."""
@@ -734,7 +852,9 @@ class UAETransactionData:
 				)
 			)
 		if not is_valid_uae_trn(self.company.tax_id):
-			self.errors.append(_("Company Tax ID must be a valid 15-digit UAE TRN (IBT-031)."))
+			self.errors.append(
+				_("Company Tax ID must be 15 digits, starting with 1 and ending with 03 (IBR-132-AE).")
+			)
 		if not self.company.get("uae_peppol_id"):
 			self.errors.append(
 				_("Company Peppol Participant ID (IBT-034) is required — set it on Company {0}.").format(
@@ -791,9 +911,17 @@ class UAETransactionData:
 					_("Customer must have a TRN or Trade License Number for domestic invoices (IBR-135-ae).")
 				)
 			elif customer["trn"] and not is_valid_uae_trn(customer["trn"]):
-				self.errors.append(_("Customer TRN must be a valid 15-digit UAE TRN."))
+				self.errors.append(
+					_("Customer TRN must be 15 digits, starting with 1 and ending with 03 (IBR-132-AE).")
+				)
 
 		self.errors.extend(buyer_fz_validation_messages(flags, customer.get("fz_beneficiary_id")))
+		self.errors.extend(
+			licence_authority_validation_messages(_("Company"), supplier, "IBR-172-AE")
+		)
+		self.errors.extend(
+			licence_authority_validation_messages(_("Customer"), customer, "IBR-191-AE")
+		)
 
 		if self.doc.get("is_return") and not customer["trade_license_number"] and not customer["trn"]:
 			self.errors.append(_("Customer legal identifier is mandatory for Credit Notes (IBR-136-ae)."))
@@ -846,11 +974,25 @@ class UAETransactionData:
 							row.idx, row.item_tax_template
 						)
 					)
-				if category == "Reverse Charge" and not template.get("uae_rcm_nature"):
+				rcm_type = template.get("uae_rcm_nature")
+				if category == "Reverse Charge" and not rcm_type:
 					self.errors.append(
-						_("Row #{0}: RCM nature code is required on Item Tax Template {1}.").format(
+						_("Row #{0}: Reverse charge type is required on Item Tax Template {1}.").format(
 							row.idx, row.item_tax_template
 						)
+					)
+				elif rcm_type and rcm_type not in RCM_TYPE_CODES:
+					self.errors.append(
+						_("Row #{0}: Reverse charge type {1} is not an FTA category.").format(
+							row.idx, rcm_type
+						)
+					)
+				if category == "Reverse Charge" and not self._gtin_by_item().get(row.item_code):
+					self.errors.append(
+						_(
+							"Row #{0}: reverse charge requires a GTIN barcode on Item {1} "
+							"(standard item identifier, scheme 0160)."
+						).format(row.idx, row.item_code or row.item_name)
 					)
 
 	def _check_credit_note(self):
@@ -863,8 +1005,9 @@ class UAETransactionData:
 					"Against, or External Return Against for invoices issued outside this system."
 				)
 			)
-		if not self.doc.get("uae_credit_note_reason"):
-			self.errors.append(_("UAE Credit Note Reason is required for Credit Notes."))
+		self.errors.extend(
+			credit_note_reason_validation_messages(True, self.doc.get("uae_credit_note_reason"))
+		)
 
 	def _check_due_date(self):
 		if self.doc.get("is_return"):

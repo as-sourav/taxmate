@@ -36,14 +36,21 @@ def send_vat_201_reminders() -> None:
 		due = getdate(log.filing_due_date)
 		if today < add_days(due, -lead_days):
 			continue
-		state = _("Overdue") if today > due else _("Due")
 		_raise_todo_once(
 			log.name,
-			_(
-				"VAT 201 for {0} (period ending {1}) is {2}. Due {3}. "
-				"Prepare the accountant pack and file in EmaraTax; submitting the log does not e-file."
-			).format(log.company, log.period_end, state, log.filing_due_date),
+			vat_201_reminder_text(log.company, log.period_end, log.filing_due_date, today=today),
 		)
+
+
+def vat_201_reminder_text(company, period_end, due, today=None) -> str:
+	"""VAT 201 reminder in the current user's language. Company names stay as stored."""
+	today = getdate(today or nowdate())
+	due_date = getdate(due)
+	state = _("Overdue") if today > due_date else _("Due")
+	return _(
+		"VAT 201 for {0} (period ending {1}) is {2}. Due {3}. "
+		"Prepare the accountant pack and file in EmaraTax; submitting the log does not e-file."
+	).format(company, period_end, state, due)
 
 
 def _raise_todo_once(name: str, description: str) -> None:

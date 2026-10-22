@@ -31,7 +31,7 @@ PARTY_LEGAL_FIELDS = [
 		"fieldname": "legal_registration_identifier_type",
 		"label": "Legal Registration Identifier Type",
 		"fieldtype": "Select",
-		"options": "\nCRN\nOTH",
+		"options": "\nTL\nEID\nPAS\nCD",
 		"insert_after": "trade_license_number",
 		"translatable": 0,
 	},
@@ -43,10 +43,18 @@ PARTY_LEGAL_FIELDS = [
 		"translatable": 0,
 	},
 	{
+		"fieldname": "uae_licence_authority",
+		"label": "Licence Authority",
+		"fieldtype": "Data",
+		"insert_after": "legal_registration_identifier",
+		"description": "Authority that issued the trade licence. Required on the e-invoice when the registration type is TL.",
+		"translatable": 0,
+	},
+	{
 		"fieldname": "uae_peppol_id",
 		"label": "Peppol Participant ID",
 		"fieldtype": "Data",
-		"insert_after": "legal_registration_identifier",
+		"insert_after": "uae_licence_authority",
 		"description": "Peppol endpoint identifier used for e-invoice exchange",
 		"translatable": 0,
 	},
@@ -109,6 +117,19 @@ INVOICE_E_INVOICE_FIELDS = [
 		"translatable": 0,
 	},
 	{
+		"fieldname": "uae_principal_trn",
+		"label": "Principal TRN",
+		"fieldtype": "Data",
+		"insert_after": "uae_transaction_type_code",
+		"depends_on": 'eval:(doc.uae_transaction_type_code || "").charAt(5) == "1"',
+		"mandatory_depends_on": 'eval:(doc.uae_transaction_type_code || "").charAt(5) == "1"',
+		"description": (
+			"BTAE-14. UAE TRN of the principal on a disclosed-agent invoice. "
+			"Must differ from the seller TRN (IBR-176-AE)."
+		),
+		"translatable": 0,
+	},
+	{
 		"fieldname": "uae_billing_frequency",
 		"label": "Billing Frequency",
 		"fieldtype": "Select",
@@ -138,6 +159,11 @@ INVOICE_E_INVOICE_FIELDS = [
 		"insert_after": "uae_payment_means_code",
 		"depends_on": "eval:doc.is_return",
 		"mandatory_depends_on": "eval:doc.is_return",
+		"description": (
+			"BTAE-03. Sent as CreditNoteReasonCode. Use SUPPLY_CANCELLED, "
+			"TAX_TREATMENT_CHANGED, CONSIDERATION_ALTERED, GOODS_OR_SERVICES_RETURNED, "
+			"TAX_APPLIED_IN_ERROR, or VOLUME_DISCOUNT."
+		),
 	},
 	{
 		"fieldname": "uae_return_against_external",
@@ -205,6 +231,11 @@ PURCHASE_VAT_OPS_FIELDS = [
 		"insert_after": "uae_box_9_taxable_amount",
 		"depends_on": "eval:doc.is_return",
 		"mandatory_depends_on": "eval:doc.is_return",
+		"description": (
+			"BTAE-03. Sent as CreditNoteReasonCode. Use SUPPLY_CANCELLED, "
+			"TAX_TREATMENT_CHANGED, CONSIDERATION_ALTERED, GOODS_OR_SERVICES_RETURNED, "
+			"TAX_APPLIED_IN_ERROR, or VOLUME_DISCOUNT."
+		),
 	},
 	{
 		"fieldname": "uae_return_against_external",
@@ -255,6 +286,25 @@ PURCHASE_INVOICE_E_INVOICE_FIELDS = [
 			"BTAE-02: 8-digit flag string — positions: 1 Free Trade Zone, 2 Deemed supply, "
 			"3 Margin scheme, 4 Summary invoice, 5 Continuous supply, "
 			"6 Disclosed agent billing, 7 E-commerce, 8 Export"
+		),
+		"translatable": 0,
+	},
+	{
+		"fieldname": "uae_principal_trn",
+		"label": "Principal TRN",
+		"fieldtype": "Data",
+		"insert_after": "uae_transaction_type_code",
+		"depends_on": (
+			"eval:doc.uae_submit_to_fta && "
+			'(doc.uae_transaction_type_code || "").charAt(5) == "1"'
+		),
+		"mandatory_depends_on": (
+			"eval:doc.uae_submit_to_fta && "
+			'(doc.uae_transaction_type_code || "").charAt(5) == "1"'
+		),
+		"description": (
+			"BTAE-14. UAE TRN of the principal on a disclosed-agent invoice. "
+			"Must differ from the seller TRN (IBR-176-AE)."
 		),
 		"translatable": 0,
 	},
@@ -424,7 +474,7 @@ CUSTOM_FIELDS = {
 			"fieldname": "legal_registration_identifier_type",
 			"label": "Legal Registration Identifier Type",
 			"fieldtype": "Select",
-			"options": "\nCRN\nOTH",
+			"options": "\nTL\nEID\nPAS\nCD",
 			"insert_after": "trade_license_number",
 			"translatable": 0,
 		},
@@ -436,10 +486,18 @@ CUSTOM_FIELDS = {
 			"translatable": 0,
 		},
 		{
+			"fieldname": "uae_licence_authority",
+			"label": "Licence Authority",
+			"fieldtype": "Data",
+			"insert_after": "legal_registration_identifier",
+			"description": "Authority that issued the trade licence. Required on the e-invoice when the registration type is TL.",
+			"translatable": 0,
+		},
+		{
 			"fieldname": "uae_peppol_id",
 			"label": "Peppol Participant ID",
 			"fieldtype": "Data",
-			"insert_after": "legal_registration_identifier",
+			"insert_after": "uae_licence_authority",
 			"description": "Company's Peppol endpoint identifier registered with the ASP",
 			"translatable": 0,
 		},
@@ -577,10 +635,15 @@ CUSTOM_FIELDS = {
 		},
 		{
 			"fieldname": "uae_rcm_nature",
-			"label": "UAE RCM Nature",
-			"fieldtype": "Data",
+			"label": "UAE RCM Type",
+			"fieldtype": "Select",
+			"options": (
+				"\nELECTRONIC_DEVICES\nGOLD_AND_DIAMONDS\nCRUDE_OR_REFINED_OIL"
+				"\nUNPROCESSED_OR_PROCESSED_NATURAL_GAS\nPURE_HYDROCARBONS"
+			),
 			"insert_after": "uae_exemption_reason",
 			"depends_on": "eval:doc.uae_vat_category=='Reverse Charge'",
+			"description": "FTA reverse-charge category. Sent as Reverse Charge Mechanism Type.",
 			"translatable": 0,
 		},
 		{

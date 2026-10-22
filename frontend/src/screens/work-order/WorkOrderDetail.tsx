@@ -10,7 +10,8 @@ import { DT, METHOD } from "../../lib/frappe";
 import { useDeleteDraftAction } from "../../lib/useDraftDelete";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
-import { canWrite } from "../../lib/roles";
+import { canCancelSales, canSubmitSales, canWrite } from "../../lib/roles";
+import { confirmCancel } from "../../lib/workflow";
 import { date } from "../../lib/format";
 import { t } from "../../i18n/strings";
 import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow } from "../../components/ui";
@@ -36,18 +37,33 @@ export default function WorkOrderDetail() {
   const nav = useNavigate();
   const session = useSession();
   const writable = canWrite(session);
+  const canSubmit = canSubmitSales(session.roles);
+  const canCancel = canCancelSales(session.roles);
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.workOrder, name);
   const submitCall = useFrappePostCall(METHOD.submit);
   const cancelCall = useFrappePostCall(METHOD.cancel);
+  const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<unknown>(null);
 
   async function doAction(kind: "submit" | "cancel") {
+    if (kind === "cancel" && !confirmCancel(name)) return;
     setBusy(true); setActionError(null);
     try {
-      if (kind === "submit") await submitCall.call({ doctype: DT.workOrder, name });
+      if (kind === "submit") await submitCall.call({ doc: { doctype: DT.workOrder, name } });
       else await cancelCall.call({ doctype: DT.workOrder, name });
       mutate();
+    } catch (err) { setActionError(err); }
+    finally { setBusy(false); }
+  }
+
+  async function doAmend() {
+    setBusy(true); setActionError(null);
+    try {
+      const res = await amendCall.call({ doctype: DT.workOrder, name });
+      const next = res?.message?.name;
+      if (next) nav(`/work-orders/${encodeURIComponent(next)}`);
+      else mutate();
     } catch (err) { setActionError(err); }
     finally { setBusy(false); }
   }
@@ -67,17 +83,20 @@ export default function WorkOrderDetail() {
             {writable && data.docstatus === 0 && (
               <button type="button" className="btn ghost" onClick={() => nav(`/work-orders/${encodeURIComponent(name)}/edit`)}>{t("edit")}</button>
             )}
-            {writable && data.docstatus === 0 && (
+            {canSubmit && data.docstatus === 0 && (
               <button type="button" className="btn" onClick={() => void doAction("submit")} disabled={busy}>{t("wo.submit")}</button>
             )}
-            {data.docstatus === 0 && (
+            {writable && data.docstatus === 0 && (
               <button type="button" className="btn quiet" disabled={deleteAction.loading}
                 onClick={deleteAction.onDelete}>
                 {deleteAction.loading ? t("soc.saving") : t("inv.delete")}
               </button>
             )}
-            {writable && data.docstatus === 1 && (
+            {canCancel && data.docstatus === 1 && (
               <button type="button" className="btn ghost" onClick={() => void doAction("cancel")} disabled={busy}>{t("wo.cancel")}</button>
+            )}
+            {canSubmit && data.docstatus === 2 && (
+              <button type="button" className="btn ghost" onClick={() => void doAmend()} disabled={busy}>{t("inv.amend")}</button>
             )}
           </>
         }

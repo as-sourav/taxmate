@@ -9,7 +9,8 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
-_TRN_RE = re.compile(r"^100\d{12}$")
+# IBR-132-AE: 15 digits, starts with 1, ends with 03.
+_TRN_RE = re.compile(r"^1\d{12}03$")
 _ISO_CURRENCIES = frozenset(
 	{
 		"AED",

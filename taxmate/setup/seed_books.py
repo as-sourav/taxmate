@@ -947,7 +947,7 @@ def _seed_sales_returns(ctx: dict) -> int:
 	try:
 		ret = make_sales_return(src)
 		if ret.meta.has_field("uae_credit_note_reason"):
-			ret.uae_credit_note_reason = "Goods returned"
+			ret.uae_credit_note_reason = "GOODS_OR_SERVICES_RETURNED"
 		ret.insert(ignore_permissions=True)
 		ret.submit()
 		return 1
@@ -974,7 +974,7 @@ def _seed_purchase_returns(ctx: dict) -> int:
 	try:
 		ret = make_debit_note(src)
 		if ret.meta.has_field("uae_credit_note_reason"):
-			ret.uae_credit_note_reason = "Goods returned"
+			ret.uae_credit_note_reason = "GOODS_OR_SERVICES_RETURNED"
 		ret.insert(ignore_permissions=True)
 		ret.submit()
 		return 1

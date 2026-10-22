@@ -110,6 +110,46 @@ ITEM_TYPE_GOODS = "Goods"
 ITEM_TYPE_SERVICE = "Service"
 ITEM_TYPE_BOTH = "Both"
 
+# extensions.ae_creditNoteReasonCode. Complyance maps CreditNoteReasonCode to this enum.
+# BTAE-03. VOLUME_DISCOUNT is the only reason that may omit a preceding invoice.
+CREDIT_NOTE_REASON_CODES = {
+	"SUPPLY_CANCELLED": "Supply cancelled",
+	"TAX_TREATMENT_CHANGED": "Tax treatment changed",
+	"CONSIDERATION_ALTERED": "Consideration altered",
+	"GOODS_OR_SERVICES_RETURNED": "Goods or services returned",
+	"TAX_APPLIED_IN_ERROR": "Tax applied in error",
+	"VOLUME_DISCOUNT": "Volume discount",
+}
+
+# Phrases already stored on credit notes before the reason became a code.
+_LEGACY_CREDIT_NOTE_REASONS = {
+	"goods returned": "GOODS_OR_SERVICES_RETURNED",
+	"pricing correction": "CONSIDERATION_ALTERED",
+	"vd": "VOLUME_DISCOUNT",
+	"volume discount": "VOLUME_DISCOUNT",
+}
+
+
+def credit_note_reason_code(raw: str | None) -> str | None:
+	"""Return the GETS reason code, or None when the text is not a known reason."""
+	text = (raw or "").strip()
+	if not text:
+		return None
+	head = text.split(" - ", 1)[0].strip()
+	if head in CREDIT_NOTE_REASON_CODES:
+		return head
+	return _LEGACY_CREDIT_NOTE_REASONS.get(text.lower())
+
+
+# lineItems[].extensions.ae_rcmType. Required only on reverse-charge lines.
+RCM_TYPE_CODES = (
+	"ELECTRONIC_DEVICES",
+	"GOLD_AND_DIAMONDS",
+	"CRUDE_OR_REFINED_OIL",
+	"UNPROCESSED_OR_PROCESSED_NATURAL_GAS",
+	"PURE_HYDROCARBONS",
+)
+
 # E-invoice lifecycle statuses shared by log + invoice custom field
 E_INVOICE_STATUSES = (
 	"Draft",

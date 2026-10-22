@@ -64,7 +64,7 @@ export default function JournalEntryDetail() {
   const canCancel = canCancelSales(session.roles);
   const writable = canWrite(session);
   const busy = submitCall.loading || cancelCall.loading || amendCall.loading;
-  const busyError = deleteAction.error || submitCall.error || cancelCall.error;
+  const busyError = deleteAction.error || submitCall.error || cancelCall.error || amendCall.error;
 
   return (
     <>

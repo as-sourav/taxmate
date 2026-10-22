@@ -45,6 +45,7 @@ def golden_transaction_data() -> dict:
 			"peppol_id": "0235:100000000000003",
 			"legal_registration_identifier": "CN-1234567",
 			"legal_registration_identifier_type": "CL",
+			"licence_authority": "Dubai Department of Economy and Tourism",
 			"address": {
 				"line1": "Sheikh Zayed Road",
 				"city": "Dubai",
@@ -55,7 +56,7 @@ def golden_transaction_data() -> dict:
 		},
 		"customer": {
 			"name": "Buyer FZ-LLC",
-			"trn": "100000000000004",
+			"trn": "100000000000103",
 			"peppol_id": None,
 			"fz_beneficiary_id": None,
 			"address": {
@@ -201,10 +202,47 @@ class TestPintAePayload(unittest.TestCase):
 			self.payload["InvoicePeriod"],
 			{"StartDate": "2026-08-27", "EndDate": "2026-09-26", "DescriptionCode": "MTH"},
 		)
-		self.assertEqual(self.payload["TaxPointDate"], "2026-08-27")
+		self.assertNotIn("TaxPointDate", self.payload)
+		self.assertEqual(
+			self.payload["Delivery"]["DeliveryLocation"]["Address"]["StreetName"],
+			"Airport Road",
+		)
 		# AED invoices must not carry a tax-currency conversion block
 		self.assertNotIn("TaxCurrencyCode", self.payload)
 		self.assertNotIn("TaxExchangeRate", self.payload)
+
+	def test_disclosed_agent_emits_its_own_principal_trn(self):
+		data = golden_transaction_data()
+		data["principal_trn"] = "100000000000203"
+		_, payload = build_payload_from_data(data)
+		self.assertEqual(payload["PrincipalTRN"], "100000000000203")
+		self.assertNotEqual(
+			payload["PrincipalTRN"],
+			payload["AccountingSupplierParty"]["Party"]["PartyTaxScheme"]["CompanyID"],
+		)
+
+	def test_reverse_charge_line_carries_gtin(self):
+		data = golden_transaction_data()
+		data["lines"][1]["standard_item_id"] = "6291000000006"
+		data["lines"][1]["standard_item_scheme"] = "0160"
+		data["lines"][1]["rcm_nature"] = "ELECTRONIC_DEVICES"
+		_, payload = build_payload_from_data(data)
+		item = payload["InvoiceLine"][1]["Item"]
+		self.assertEqual(
+			item["StandardItemIdentification"],
+			{"ID": {"schemeID": "0160", "value": "6291000000006"}},
+		)
+		self.assertEqual(item["RCMType"], "ELECTRONIC_DEVICES")
+		self.assertEqual(
+			item["CommodityClassification"],
+			[{"ItemClassificationCode": {"listID": "HS", "value": "85171200"}}],
+		)
+
+	def test_earlier_tax_point_date_is_kept(self):
+		data = golden_transaction_data()
+		data["tax_point_date"] = "2026-08-01"
+		_, payload = build_payload_from_data(data)
+		self.assertEqual(payload["TaxPointDate"], "2026-08-01")
 
 	def test_parties(self):
 		supplier = self.payload["AccountingSupplierParty"]["Party"]
@@ -213,7 +251,12 @@ class TestPintAePayload(unittest.TestCase):
 		self.assertEqual(supplier["PostalAddress"]["CountrySubentityCode"], "DXB")
 		self.assertEqual(
 			supplier["PartyLegalEntity"]["CompanyID"],
-			{"schemeID": "CL", "value": "CN-1234567"},
+			{
+				"schemeID": "TL",
+				"schemeAgencyID": "TL",
+				"schemeAgencyName": "Dubai Department of Economy and Tourism",
+				"value": "CN-1234567",
+			},
 		)
 
 		customer = self.payload["AccountingCustomerParty"]["Party"]
@@ -225,17 +268,25 @@ class TestPintAePayload(unittest.TestCase):
 		self.assertEqual(len(lines), 2)
 
 		services = lines[0]
+		self.assertNotIn("CommodityClassification", services["Item"])
 		self.assertEqual(
-			services["Item"]["CommodityClassification"]["ItemClassificationCode"],
-			{"listID": "SAC", "value": "998311"},
+			services["Item"]["ServiceAccountingCode"],
+			{"schemeID": "SAC", "value": "998311"},
 		)
 		self.assertEqual(services["Item"]["ClassifiedTaxCategory"]["ID"], "S")
 		self.assertEqual(services["LineExtensionAmountAED"], 1000.0)
 
 		goods = lines[1]
 		self.assertEqual(
-			goods["Item"]["CommodityClassification"]["ItemClassificationCode"],
-			{"listID": "HS", "value": "85171200"},
+			goods["Item"]["CommodityClassification"],
+			[{"ItemClassificationCode": {"listID": "HS", "value": "85171200"}}],
+		)
+		self.assertNotIn("StandardItemIdentification", goods["Item"])
+		self.assertNotIn("PrincipalTRN", self.payload)
+		self.assertNotIn("CreditNoteReasonCode", self.payload)
+		self.assertEqual(
+			goods["Price"]["GrossPrice"],
+			{"value": goods["Price"]["PriceAmount"]["value"], "currencyID": "AED"},
 		)
 		self.assertEqual(
 			goods["Item"]["ClassifiedTaxCategory"]["TaxExemptionReason"],
@@ -257,7 +308,7 @@ class TestPintAePayload(unittest.TestCase):
 
 	def test_payment_means(self):
 		means = self.payload["PaymentMeans"][0]
-		self.assertEqual(means["PaymentMeansCode"]["value"], "30")
+		self.assertEqual(means["PaymentMeansCode"]["value"], "CREDIT_TRANSFER")
 		self.assertEqual(
 			means["PayeeFinancialAccount"]["ID"],
 			{"schemeID": "IBAN", "value": "AE070331234567890123456"},
@@ -273,7 +324,8 @@ class TestPintAePayload(unittest.TestCase):
 		_, payload = build_payload_from_data(data)
 		self.assertEqual(payload["InvoiceTypeCode"], "381")
 		self.assertEqual(payload["BillingReference"]["InvoiceDocumentReference"]["ID"], "SINV-0000")
-		self.assertEqual(payload["Note"], "Goods returned")
+		self.assertEqual(payload["CreditNoteReasonCode"], "GOODS_OR_SERVICES_RETURNED")
+		self.assertNotIn("Note", payload)
 
 	def test_invoice_note_ibt022(self):
 		data = golden_transaction_data()
@@ -281,12 +333,13 @@ class TestPintAePayload(unittest.TestCase):
 		_, payload = build_payload_from_data(data)
 		self.assertEqual(payload["Note"], "Summary billing for August")
 
-	def test_note_combines_remarks_and_credit_reason(self):
+	def test_note_keeps_remarks_and_reason_is_a_code(self):
 		data = golden_transaction_data()
 		data["notes"] = ["Monthly summary"]
 		data["credit_note"] = {"reference": None, "reason": "Goods returned"}
 		_, payload = build_payload_from_data(data)
-		self.assertEqual(payload["Note"], ["Monthly summary", "Goods returned"])
+		self.assertEqual(payload["Note"], "Monthly summary")
+		self.assertEqual(payload["CreditNoteReasonCode"], "GOODS_OR_SERVICES_RETURNED")
 
 	def test_external_billing_reference_omits_issue_date(self):
 		data = golden_transaction_data()
@@ -299,6 +352,7 @@ class TestPintAePayload(unittest.TestCase):
 		reference = payload["BillingReference"]["InvoiceDocumentReference"]
 		self.assertEqual(reference["ID"], "LEGACY-INV-42")
 		self.assertNotIn("IssueDate", reference)
+		self.assertEqual(payload["CreditNoteReasonCode"], "CONSIDERATION_ALTERED")
 
 	def test_foreign_currency_carries_aed_totals(self):
 		data = golden_transaction_data()
@@ -367,10 +421,23 @@ class TestPintAePayload(unittest.TestCase):
 			}
 		]
 		_, payload = build_payload_from_data(data)
-		classifications = payload["InvoiceLine"][0]["Item"]["CommodityClassification"]
-		self.assertEqual(len(classifications), 2)
-		lists = {c["ItemClassificationCode"]["listID"] for c in classifications}
-		self.assertEqual(lists, {"HS", "SAC"})
+		item = payload["InvoiceLine"][0]["Item"]
+		self.assertEqual(
+			item["CommodityClassification"],
+			[{"ItemClassificationCode": {"listID": "HS", "value": "85171200"}}],
+		)
+		self.assertEqual(item["ServiceAccountingCode"], {"schemeID": "SAC", "value": "998311"})
+		self.assertEqual(item["ItemType"], "Both")
+		self.assertNotIn("RCMType", item)
+
+	def test_reverse_charge_type_is_an_fta_code(self):
+		data = golden_transaction_data()
+		data["lines"][0]["vat_category_code"] = "AE"
+		data["lines"][0]["rcm_nature"] = "GOLD_AND_DIAMONDS"
+		_, payload = build_payload_from_data(data)
+		item = payload["InvoiceLine"][0]["Item"]
+		self.assertEqual(item["RCMType"], "GOLD_AND_DIAMONDS")
+		self.assertNotIn("RCMNature", item["ClassifiedTaxCategory"])
 
 
 class TestIbtRules(unittest.TestCase):
@@ -435,6 +502,58 @@ class TestIbtRules(unittest.TestCase):
 		self.assertIn("buyer", msgs[0].lower())
 		self.assertEqual(buyer_fz_validation_messages({"free_trade_zone": True}, "FZ-99"), [])
 		self.assertEqual(buyer_fz_validation_messages({"free_trade_zone": False}, None), [])
+
+	def test_principal_trn_only_on_disclosed_agent(self):
+		from taxmate.uae_e_invoicing.utils.transaction_data import principal_trn_validation_messages
+
+		flags = {"disclosed_agent_billing": True}
+		self.assertIn("BTAE-14", principal_trn_validation_messages(flags, None, "100000000000003")[0])
+		self.assertIn(
+			"IBR-132-AE",
+			principal_trn_validation_messages(flags, "123", "100000000000003")[0],
+		)
+		self.assertIn(
+			"IBR-176-AE",
+			principal_trn_validation_messages(flags, "100000000000003", "100000000000003")[0],
+		)
+		self.assertEqual(
+			principal_trn_validation_messages(flags, "100000000000203", "100000000000003"),
+			[],
+		)
+		self.assertEqual(
+			principal_trn_validation_messages({"disclosed_agent_billing": False}, None, "100000000000003"),
+			[],
+		)
+
+	def test_credit_note_reason_accepts_code_and_legacy_phrase(self):
+		from taxmate.uae_e_invoicing.constants import credit_note_reason_code
+		from taxmate.uae_e_invoicing.utils.transaction_data import credit_note_reason_validation_messages
+
+		self.assertEqual(credit_note_reason_code("Goods returned"), "GOODS_OR_SERVICES_RETURNED")
+		self.assertEqual(credit_note_reason_code("VOLUME_DISCOUNT - Volume discount"), "VOLUME_DISCOUNT")
+		self.assertIsNone(credit_note_reason_code("because the customer asked"))
+		self.assertEqual(credit_note_reason_validation_messages(True, "GOODS_OR_SERVICES_RETURNED"), [])
+		self.assertTrue(credit_note_reason_validation_messages(True, "because the customer asked"))
+		self.assertEqual(credit_note_reason_validation_messages(False, None), [])
+
+	def test_trade_licence_requires_authority_name(self):
+		from taxmate.uae_e_invoicing.utils.transaction_data import licence_authority_validation_messages
+
+		party = {"legal_registration_identifier": "CN-1234567", "legal_registration_identifier_type": "TL"}
+		msgs = licence_authority_validation_messages("Company", party, "IBR-172-AE")
+		self.assertIn("IBR-172-AE", msgs[0])
+		party["licence_authority"] = "Dubai Department of Economy and Tourism"
+		self.assertEqual(licence_authority_validation_messages("Company", party, "IBR-172-AE"), [])
+		eid = {"legal_registration_identifier": "784-0000-0000000-0", "legal_registration_identifier_type": "EID"}
+		self.assertEqual(licence_authority_validation_messages("Customer", eid, "IBR-191-AE"), [])
+
+	def test_gtin_barcode_rejects_hs_and_short_codes(self):
+		from taxmate.uae_e_invoicing.utils.transaction_data import gtin_barcode
+
+		self.assertEqual(gtin_barcode("6291000000006"), "6291000000006")
+		self.assertIsNone(gtin_barcode("851712"))
+		self.assertIsNone(gtin_barcode("8517120000"))
+		self.assertIsNone(gtin_barcode("ABC1234567890"))
 
 
 class TestComplyanceUnify(unittest.TestCase):

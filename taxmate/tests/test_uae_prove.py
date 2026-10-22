@@ -233,5 +233,5 @@ class TestEInvoiceMatrix(FrappeTestCase):
 		self.assertEqual(data.get_document_type_code(), "381")
 		credit = data._get_credit_note_details()
 		self.assertEqual(credit["reference"]["id"], docs["standard"].name)
-		self.assertEqual(credit["reason"], "Goods returned")
+		self.assertEqual(credit["reason"], "GOODS_OR_SERVICES_RETURNED")
 		self.assertEqual(str(credit["reference"]["issue_date"]), "2026-11-01")

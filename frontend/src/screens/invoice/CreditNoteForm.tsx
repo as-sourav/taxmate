@@ -6,6 +6,7 @@ import { DT, METHOD } from "../../lib/frappe";
 import { useInsert } from "../../lib/resource";
 import { money, parseNum } from "../../lib/format";
 import { t } from "../../i18n/strings";
+import { CREDIT_NOTE_REASON_LABELS, CREDIT_NOTE_REASONS, creditNoteReasonCode } from "../../lib/creditNoteReason";
 import { Card, ErrorBox, Field, Loading, PageHead } from "../../components/ui";
 import LineItems, { type LineField } from "../../components/LineItems";
 
@@ -33,14 +34,14 @@ export default function CreditNoteForm() {
     make.call({ source_name: name }).then((r) => {
       const doc = r?.message ?? null;
       setDraft(doc);
-      setReason(doc?.uae_credit_note_reason || "");
+      setReason(creditNoteReasonCode(doc?.uae_credit_note_reason));
     }).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name]);
 
   async function save() {
     if (!draft) return;
-    if (!reason.trim()) {
+    if (!creditNoteReasonCode(reason)) {
       setSaveError({ message: t("inv.reasonRequired") });
       return;
     }
@@ -67,7 +68,7 @@ export default function CreditNoteForm() {
         actions={
           <>
             <button className="btn ghost" onClick={() => nav(`/invoices/${encodeURIComponent(name)}`)}>{t("soc.discard")}</button>
-            <button className="btn" disabled={busy || !reason.trim()} onClick={() => void save()}>
+            <button className="btn" disabled={busy || !creditNoteReasonCode(reason)} onClick={() => void save()}>
               {busy ? t("soc.saving") : t("soc.save")}
             </button>
           </>
@@ -75,8 +76,13 @@ export default function CreditNoteForm() {
       />
       {saveError && <ErrorBox error={saveError} />}
       <Card title={t("inv.reason")}>
-        <Field label={t("inv.reason")} required>
-          <input className="ctl" value={reason} onChange={(e) => setReason(e.target.value)} />
+        <Field label={t("inv.reason")} required hint={t("inv.reasonHint")}>
+          <select className="ctl" value={creditNoteReasonCode(reason)} onChange={(e) => setReason(e.target.value)}>
+            <option value="">Choose a reason</option>
+            {CREDIT_NOTE_REASONS.map((code) => (
+              <option key={code} value={code}>{CREDIT_NOTE_REASON_LABELS[code]}</option>
+            ))}
+          </select>
         </Field>
       </Card>
       <Card title={t("inv.lines")} bodyClass={null}>

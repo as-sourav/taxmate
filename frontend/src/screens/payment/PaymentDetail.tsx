@@ -2,6 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { confirmCancel } from "../../lib/workflow";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { date, money } from "../../lib/format";
@@ -38,20 +39,6 @@ type Doc = {
   references?: Ref[];
 };
 
-function AmendButton({ name, nav }: { name: string; nav: (to: string) => void }) {
-  const amendCall = useFrappePostCall<{ message: { name: string } }>(METHOD.amend);
-  return (
-    <button className="btn ghost" disabled={amendCall.loading}
-      onClick={() => void amendCall.call({ doctype: DT.paymentEntry, name })
-        .then((r) => {
-          const n = r?.message?.name || "";
-          if (n) nav(`/payments/${encodeURIComponent(n)}/edit`);
-        })}>
-      {amendCall.loading ? t("soc.saving") : t("pay.amend")}
-    </button>
-  );
-}
-
 export default function PaymentDetail() {
   const { name = "" } = useParams();
   const deleteAction = useDeleteDraftAction({ doctype: DT.paymentEntry, name, listPath: "/payments" });
@@ -60,6 +47,7 @@ export default function PaymentDetail() {
 
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.paymentEntry, name);
   const cancelCall = useFrappePostCall(METHOD.cancel);
+  const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
 
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={() => mutate()} />;
@@ -114,12 +102,21 @@ export default function PaymentDetail() {
             )}
             {canCancel && (
               <button className="btn quiet" disabled={cancelCall.loading}
-                onClick={() => void cancelCall.call({ doctype: DT.paymentEntry, name }).then(() => mutate())}>
+                onClick={() => {
+                  if (!confirmCancel(name)) return;
+                  void cancelCall.call({ doctype: DT.paymentEntry, name }).then(() => mutate()).catch(() => undefined);
+                }}>
                 {cancelCall.loading ? t("soc.saving") : t("pay.cancel")}
               </button>
             )}
             {data.docstatus === 2 && (
-              <AmendButton name={name} nav={nav} />
+              <button className="btn ghost" disabled={amendCall.loading}
+                onClick={() => void amendCall.call({ doctype: DT.paymentEntry, name }).then((r) => {
+                  const n = r?.message?.name || "";
+                  if (n) nav(`/payments/${encodeURIComponent(n)}/edit`);
+                }).catch(() => undefined)}>
+                {amendCall.loading ? t("soc.saving") : t("pay.amend")}
+              </button>
             )}
           </>
         }
@@ -132,7 +129,9 @@ export default function PaymentDetail() {
         </p>
       </PageHead>
 
-      {(cancelCall.error || deleteAction.error) && <ErrorBox error={cancelCall.error ?? deleteAction.error} />}
+      {(cancelCall.error || amendCall.error || deleteAction.error) && (
+        <ErrorBox error={cancelCall.error ?? amendCall.error ?? deleteAction.error} />
+      )}
 
       <Card bodyClass="cbody">
         <div className="srow" style={{ paddingBlock: 0 }}>
