@@ -1,13 +1,17 @@
-
 workflows:
   capacitor-ios:
-    name: TaxMate iOS Development Build
+    name: TaxMate iOS TestFlight Build
     max_build_duration: 120
     instance_type: mac_mini_m2
 
+    # Name must match the integration you created in Codemagic:
+    # Team settings > Integrations > Developer Portal
+    integrations:
+      app_store_connect: taxmate_api
+
     environment:
       ios_signing:
-        distribution_type: development
+        distribution_type: app_store
         bundle_identifier: com.ascratech.taxmate
 
       vars:
@@ -129,6 +133,25 @@ workflows:
             -list \
             -project "$PROJECT_DIR/ios/App/App.xcodeproj"
 
+      - name: Set build number and export compliance
+        script: |
+          set -euo pipefail
+
+          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
+          PBXPROJ="$PROJECT_DIR/ios/App/App.xcodeproj/project.pbxproj"
+          INFO_PLIST="$PROJECT_DIR/ios/App/App/Info.plist"
+
+          # TestFlight needs a unique, increasing build number for every upload.
+          # Codemagic's BUILD_NUMBER increases automatically with each build.
+          sed -i '' "s/CURRENT_PROJECT_VERSION = [^;]*;/CURRENT_PROJECT_VERSION = $BUILD_NUMBER;/g" "$PBXPROJ"
+          echo "Build number set to: $BUILD_NUMBER"
+          grep "CURRENT_PROJECT_VERSION" "$PBXPROJ" | sort -u
+
+          # Skips the export compliance question in TestFlight.
+          # Only correct if the app uses standard HTTPS encryption (exempt).
+          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$INFO_PLIST" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$INFO_PLIST"
+
       - name: Configure iOS code signing
         script: |
           set -euo pipefail
@@ -149,7 +172,7 @@ workflows:
             -project "$PROJECT_DIR/ios/App/App.xcodeproj" \
             -scheme "$XCODE_SCHEME"
 
-      - name: Build development IPA
+      - name: Build App Store IPA
         script: |
           set -euo pipefail
 
@@ -199,16 +222,16 @@ workflows:
           fi
 
           cp "$IPA_FILE" \
-            "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
+            "$CM_BUILD_DIR/ipa-output/TaxMate-testflight.ipa"
 
           echo "IPA copied to:"
-          ls -lh "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
+          ls -lh "$CM_BUILD_DIR/ipa-output/TaxMate-testflight.ipa"
 
       - name: Verify IPA artifact
         script: |
           set -euo pipefail
 
-          IPA_FILE="$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
+          IPA_FILE="$CM_BUILD_DIR/ipa-output/TaxMate-testflight.ipa"
 
           if [ ! -s "$IPA_FILE" ]; then
             echo "ERROR: Expected IPA artifact is missing or empty."
@@ -232,8 +255,8 @@ workflows:
           mkdir -p "$STAGING_DIR"
 
           # Include the generated IPA.
-          cp "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa" \
-            "$STAGING_DIR/TaxMate-development.ipa"
+          cp "$CM_BUILD_DIR/ipa-output/TaxMate-testflight.ipa" \
+            "$STAGING_DIR/TaxMate-testflight.ipa"
 
           # Include available Xcode build logs.
           if [ -d /tmp/xcodebuild_logs ]; then
@@ -295,3 +318,9 @@ workflows:
       - ipa-output/*.ipa
       - "**/*.ipa"
       - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        # Sends the build to TestFlight after it is processed.
+        submit_to_testflight: true
