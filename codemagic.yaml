@@ -169,13 +169,18 @@ workflows:
             -name "*.ipa" \
             -not -path '*/Pods/*' \
             -not -path '*/node_modules/*' \
+            -not -path '*/taxmate-artifacts/*' \
             -print
 
-          IPA_FILE="$(find "$PROJECT_DIR/build/ios/ipa" \
-            -maxdepth 1 \
-            -type f \
-            -name "*.ipa" \
-            -print -quit 2>/dev/null || true)"
+          IPA_FILE=""
+
+          if [ -d "$PROJECT_DIR/build/ios/ipa" ]; then
+            IPA_FILE="$(find "$PROJECT_DIR/build/ios/ipa" \
+              -maxdepth 1 \
+              -type f \
+              -name "*.ipa" \
+              -print -quit)"
+          fi
 
           if [ -z "$IPA_FILE" ]; then
             IPA_FILE="$(find "$PROJECT_DIR" \
@@ -183,6 +188,7 @@ workflows:
               -name "*.ipa" \
               -not -path '*/Pods/*' \
               -not -path '*/node_modules/*' \
+              -not -path '*/taxmate-artifacts/*' \
               -print -quit)"
           fi
 
@@ -192,7 +198,8 @@ workflows:
             exit 1
           fi
 
-          cp "$IPA_FILE" "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
+          cp "$IPA_FILE" \
+            "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
 
           echo "IPA copied to:"
           ls -lh "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
@@ -212,10 +219,79 @@ workflows:
           file "$IPA_FILE"
 
           echo "IPA archive contents:"
-          unzip -l "$IPA_FILE" | head -40
+          unzip -l "$IPA_FILE" | head -40 || true
+
+      - name: Create ZIP with IPA and build logs
+        script: |
+          set -euo pipefail
+
+          STAGING_DIR="$CM_BUILD_DIR/taxmate-artifacts"
+          ZIP_FILE="$CM_BUILD_DIR/TaxMate-iOS-artifacts.zip"
+
+          rm -rf "$STAGING_DIR"
+          mkdir -p "$STAGING_DIR"
+
+          # Include the generated IPA.
+          cp "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa" \
+            "$STAGING_DIR/TaxMate-development.ipa"
+
+          # Include available Xcode build logs.
+          if [ -d /tmp/xcodebuild_logs ]; then
+            mkdir -p "$STAGING_DIR/build-logs"
+
+            find /tmp/xcodebuild_logs \
+              -maxdepth 1 \
+              -type f \
+              -name "*.log" \
+              -exec cp {} "$STAGING_DIR/build-logs/" \;
+          fi
+
+          # Include other files in the exported IPA directory, if present.
+          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
+
+          if [ -d "$PROJECT_DIR/build/ios/ipa" ]; then
+            mkdir -p "$STAGING_DIR/ipa-export"
+
+            find "$PROJECT_DIR/build/ios/ipa" \
+              -maxdepth 1 \
+              -type f \
+              ! -name "*.ipa" \
+              -exec cp {} "$STAGING_DIR/ipa-export/" \;
+          fi
+
+          # Include available Xcode archive and debug symbols, if present.
+          ARCHIVE_DIR="$PROJECT_DIR/build/ios/archive"
+
+          if [ -d "$ARCHIVE_DIR" ]; then
+            mkdir -p "$STAGING_DIR/xcode-archive"
+
+            find "$ARCHIVE_DIR" \
+              -maxdepth 1 \
+              -type d \
+              -name "*.xcarchive" \
+              -print
+          fi
+
+          # Create a ZIP containing the collected artifacts.
+          rm -f "$ZIP_FILE"
+
+          cd "$CM_BUILD_DIR"
+          /usr/bin/zip -r "$ZIP_FILE" taxmate-artifacts
+
+          if [ ! -s "$ZIP_FILE" ]; then
+            echo "ERROR: Artifact ZIP was not created."
+            exit 1
+          fi
+
+          echo "ZIP created successfully:"
+          ls -lh "$ZIP_FILE"
+
+          echo "Verifying ZIP contents:"
+          unzip -t "$ZIP_FILE"
+          unzip -l "$ZIP_FILE"
 
     artifacts:
+      - TaxMate-iOS-artifacts.zip
       - ipa-output/*.ipa
-      - build/ios/ipa/*.ipa
       - "**/*.ipa"
       - /tmp/xcodebuild_logs/*.log
