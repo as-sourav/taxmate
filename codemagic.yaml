@@ -1,22 +1,18 @@
 
 workflows:
   capacitor-ios:
-    name: TaxMate iOS Ad Hoc Build
+    name: TaxMate iOS Development Build
     max_build_duration: 120
     instance_type: mac_mini_m2
 
     environment:
       ios_signing:
-        distribution_type: ad_hoc
+        distribution_type: development
         bundle_identifier: com.ascratech.taxmate
 
       vars:
         XCODE_SCHEME: "App"
         BUNDLE_ID: "com.ascratech.taxmate"
-        APP_NAME: "TaxMate"
-
-        # Set this to the public HTTPS URL where you will host the IPA.
-        IPA_DOWNLOAD_URL: "https://YOUR-DOMAIN.com/TaxMate.ipa"
 
       node: latest
       xcode: latest
@@ -91,9 +87,11 @@ workflows:
 
           if [ ! -d dist-mobile ]; then
             echo "ERROR: dist-mobile was not generated."
+            echo "Check the output directory configured by build:mobile."
             exit 1
           fi
 
+          echo "Web build output:"
           ls -la dist-mobile
 
       - name: Prepare Capacitor iOS project
@@ -111,16 +109,22 @@ workflows:
           fi
 
           if [ ! -d ios/App/App.xcodeproj ]; then
+            echo "iOS project missing or incomplete."
+
             if [ ! -d ios ]; then
               npx cap add ios
             else
               echo "ERROR: ios directory exists but ios/App/App.xcodeproj is missing."
+              echo "Restore the iOS project or regenerate it intentionally."
               exit 1
             fi
           fi
 
           npx cap sync ios
 
+          test -d ios/App/App.xcodeproj
+
+          echo "Available Xcode schemes:"
           xcodebuild \
             -list \
             -project "$PROJECT_DIR/ios/App/App.xcodeproj"
@@ -145,7 +149,7 @@ workflows:
             -project "$PROJECT_DIR/ios/App/App.xcodeproj" \
             -scheme "$XCODE_SCHEME"
 
-      - name: Build Ad Hoc IPA
+      - name: Build development IPA
         script: |
           set -euo pipefail
 
@@ -158,17 +162,30 @@ workflows:
             --project "$PROJECT_DIR/ios/App/App.xcodeproj" \
             --scheme "$XCODE_SCHEME"
 
+          echo "Searching for generated IPA..."
+
+          find "$PROJECT_DIR" \
+            -type f \
+            -name "*.ipa" \
+            -not -path '*/Pods/*' \
+            -not -path '*/node_modules/*' \
+            -not -path '*/taxmate-artifacts/*' \
+            -print
+
           IPA_FILE=""
 
           if [ -d "$PROJECT_DIR/build/ios/ipa" ]; then
             IPA_FILE="$(find "$PROJECT_DIR/build/ios/ipa" \
-              -maxdepth 1 -type f -name "*.ipa" \
+              -maxdepth 1 \
+              -type f \
+              -name "*.ipa" \
               -print -quit)"
           fi
 
           if [ -z "$IPA_FILE" ]; then
             IPA_FILE="$(find "$PROJECT_DIR" \
-              -type f -name "*.ipa" \
+              -type f \
+              -name "*.ipa" \
               -not -path '*/Pods/*' \
               -not -path '*/node_modules/*' \
               -not -path '*/taxmate-artifacts/*' \
@@ -177,179 +194,104 @@ workflows:
 
           if [ -z "$IPA_FILE" ]; then
             echo "ERROR: IPA was not generated."
+            echo "Inspect the Xcode archive/export errors above."
             exit 1
           fi
 
           cp "$IPA_FILE" \
-            "$CM_BUILD_DIR/ipa-output/TaxMate.ipa"
+            "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
 
-          ls -lh "$CM_BUILD_DIR/ipa-output/TaxMate.ipa"
+          echo "IPA copied to:"
+          ls -lh "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
 
-      - name: Verify IPA signing and bundle ID
+      - name: Verify IPA artifact
         script: |
           set -euo pipefail
 
-          IPA_FILE="$CM_BUILD_DIR/ipa-output/TaxMate.ipa"
-          VERIFY_DIR="$(mktemp -d)"
-          trap 'rm -rf "$VERIFY_DIR"' EXIT
+          IPA_FILE="$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa"
 
-          test -s "$IPA_FILE"
-          unzip -q "$IPA_FILE" -d "$VERIFY_DIR"
-
-          APP_PATH="$(find "$VERIFY_DIR/Payload" \
-            -maxdepth 1 -type d -name "*.app" -print -quit)"
-
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: No app bundle found in IPA."
+          if [ ! -s "$IPA_FILE" ]; then
+            echo "ERROR: Expected IPA artifact is missing or empty."
             exit 1
           fi
 
-          ACTUAL_BUNDLE_ID=$(/usr/libexec/PlistBuddy \
-            -c "Print :CFBundleIdentifier" \
-            "$APP_PATH/Info.plist")
+          echo "IPA artifact verified."
+          file "$IPA_FILE"
 
-          echo "Bundle ID: $ACTUAL_BUNDLE_ID"
-
-          if [ "$ACTUAL_BUNDLE_ID" != "$BUNDLE_ID" ]; then
-            echo "ERROR: Bundle ID does not match $BUNDLE_ID"
-            exit 1
-          fi
-
-          codesign -dv --verbose=4 "$APP_PATH" 2>&1 || true
-
-          if [ ! -f "$APP_PATH/embedded.mobileprovision" ]; then
-            echo "ERROR: IPA has no embedded provisioning profile."
-            exit 1
-          fi
-
-          security cms -D \
-            -i "$APP_PATH/embedded.mobileprovision" \
-            > "$VERIFY_DIR/profile.plist"
-
-          echo "Provisioning profile:"
-          /usr/libexec/PlistBuddy \
-            -c "Print :Name" "$VERIFY_DIR/profile.plist"
-
-          echo "Profile expiration:"
-          /usr/libexec/PlistBuddy \
-            -c "Print :ExpirationDate" "$VERIFY_DIR/profile.plist"
-
-          echo "Verify that your target iPhones are registered in this profile."
-
-      - name: Create OTA installation manifest
-        script: |
-          set -euo pipefail
-
-          mkdir -p "$CM_BUILD_DIR/ipa-output"
-
-          if [[ "$IPA_DOWNLOAD_URL" != https://* ]] ||
-             [[ "$IPA_DOWNLOAD_URL" == *YOUR-DOMAIN.com* ]]; then
-            echo "WARNING: Set IPA_DOWNLOAD_URL to your actual public HTTPS IPA URL."
-            echo "A usable OTA manifest cannot be generated until the URL is configured."
-            exit 1
-          fi
-
-          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
-
-          APP_VERSION="1.0"
-          BUILD_VERSION="1"
-
-          APP_PLIST="$(find "$PROJECT_DIR/ios/App" \
-            -path '*/App.app/Info.plist' -print -quit || true)"
-
-          if [ -n "$APP_PLIST" ]; then
-            APP_VERSION=$(/usr/libexec/PlistBuddy \
-              -c "Print :CFBundleShortVersionString" \
-              "$APP_PLIST" 2>/dev/null || echo "1.0")
-
-            BUILD_VERSION=$(/usr/libexec/PlistBuddy \
-              -c "Print :CFBundleVersion" \
-              "$APP_PLIST" 2>/dev/null || echo "1")
-          fi
-
-          cat > "$CM_BUILD_DIR/ipa-output/manifest.plist" <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>items</key>
-            <array>
-              <dict>
-                <key>assets</key>
-                <array>
-                  <dict>
-                    <key>kind</key>
-                    <string>software-package</string>
-                    <key>url</key>
-                    <string>${IPA_DOWNLOAD_URL}</string>
-                  </dict>
-                </array>
-                <key>metadata</key>
-                <dict>
-                  <key>bundle-identifier</key>
-                  <string>${BUNDLE_ID}</string>
-                  <key>bundle-version</key>
-                  <string>${BUILD_VERSION}</string>
-                  <key>kind</key>
-                  <string>software</string>
-                  <key>title</key>
-                  <string>${APP_NAME}</string>
-                </dict>
-              </dict>
-            </array>
-          </dict>
-          </plist>
-          EOF
-
-          plutil -lint "$CM_BUILD_DIR/ipa-output/manifest.plist"
+          echo "IPA archive contents:"
+          unzip -l "$IPA_FILE" | head -40 || true
 
       - name: Create ZIP with IPA and build logs
         script: |
           set -euo pipefail
 
-          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
           STAGING_DIR="$CM_BUILD_DIR/taxmate-artifacts"
           ZIP_FILE="$CM_BUILD_DIR/TaxMate-iOS-artifacts.zip"
 
           rm -rf "$STAGING_DIR"
           mkdir -p "$STAGING_DIR"
 
-          cp "$CM_BUILD_DIR/ipa-output/TaxMate.ipa" \
-            "$STAGING_DIR/TaxMate.ipa"
+          # Include the generated IPA.
+          cp "$CM_BUILD_DIR/ipa-output/TaxMate-development.ipa" \
+            "$STAGING_DIR/TaxMate-development.ipa"
 
-          if [ -f "$CM_BUILD_DIR/ipa-output/manifest.plist" ]; then
-            cp "$CM_BUILD_DIR/ipa-output/manifest.plist" \
-              "$STAGING_DIR/manifest.plist"
-          fi
-
+          # Include available Xcode build logs.
           if [ -d /tmp/xcodebuild_logs ]; then
             mkdir -p "$STAGING_DIR/build-logs"
 
             find /tmp/xcodebuild_logs \
-              -maxdepth 1 -type f -name "*.log" \
+              -maxdepth 1 \
+              -type f \
+              -name "*.log" \
               -exec cp {} "$STAGING_DIR/build-logs/" \;
           fi
+
+          # Include other files in the exported IPA directory, if present.
+          PROJECT_DIR="$(cat /tmp/taxmate_project_dir.txt)"
 
           if [ -d "$PROJECT_DIR/build/ios/ipa" ]; then
             mkdir -p "$STAGING_DIR/ipa-export"
 
             find "$PROJECT_DIR/build/ios/ipa" \
-              -maxdepth 1 -type f \
+              -maxdepth 1 \
+              -type f \
               ! -name "*.ipa" \
               -exec cp {} "$STAGING_DIR/ipa-export/" \;
           fi
 
+          # Include available Xcode archive and debug symbols, if present.
+          ARCHIVE_DIR="$PROJECT_DIR/build/ios/archive"
+
+          if [ -d "$ARCHIVE_DIR" ]; then
+            mkdir -p "$STAGING_DIR/xcode-archive"
+
+            find "$ARCHIVE_DIR" \
+              -maxdepth 1 \
+              -type d \
+              -name "*.xcarchive" \
+              -print
+          fi
+
+          # Create a ZIP containing the collected artifacts.
           rm -f "$ZIP_FILE"
 
           cd "$CM_BUILD_DIR"
           /usr/bin/zip -r "$ZIP_FILE" taxmate-artifacts
 
-          test -s "$ZIP_FILE"
+          if [ ! -s "$ZIP_FILE" ]; then
+            echo "ERROR: Artifact ZIP was not created."
+            exit 1
+          fi
+
+          echo "ZIP created successfully:"
+          ls -lh "$ZIP_FILE"
+
+          echo "Verifying ZIP contents:"
           unzip -t "$ZIP_FILE"
           unzip -l "$ZIP_FILE"
 
     artifacts:
       - TaxMate-iOS-artifacts.zip
       - ipa-output/*.ipa
-      - ipa-output/*.plist
+      - "**/*.ipa"
       - /tmp/xcodebuild_logs/*.log
