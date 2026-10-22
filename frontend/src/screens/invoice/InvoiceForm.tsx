@@ -16,6 +16,7 @@ import { applyLineRate, linePayload, orderDiscountFields, productDiscountTotal, 
 import { CreditLimitNotice, LineDiscountInput, LineTrack, OrderDiscountFields, PartyFields, PaymentScheduleTable, TxnTotals } from "../../components/txnFields";
 import { UAE_EMIRATES } from "../../types/uae";
 import { t } from "../../i18n/strings";
+import { CREDIT_NOTE_REASON_LABELS, CREDIT_NOTE_REASONS, creditNoteReasonCode } from "../../lib/creditNoteReason";
 import { Card, CheckField, ErrorBox, Field, Loading, PageHead, Pill } from "../../components/ui";
 import { FormLayout, MissingSummary, ReadinessCard, type Check } from "../../components/form";
 import LinkField from "../../components/LinkField";
@@ -129,7 +130,7 @@ export default function InvoiceForm() {
     setSetWarehouse(d.set_warehouse || "");
     setCurrency(d.currency || "");
     setConversionRate(Number(d.conversion_rate) || 1);
-    setReason(d.uae_credit_note_reason || "");
+    setReason(creditNoteReasonCode(d.uae_credit_note_reason));
     setLines((d.items ?? []).map((l) => ({
       ...l,
       qty: l.qty,
@@ -523,8 +524,13 @@ export default function InvoiceForm() {
                 </Field>
               ) : null}
               {!!doc?.is_return && (
-                <Field label={t("inv.reason")} required>
-                  <input className="ctl" value={reason} disabled={locked} onChange={(e) => setReason(e.target.value)} />
+                <Field label={t("inv.reason")} required hint={t("inv.reasonHint")}>
+                  <select className="ctl" value={creditNoteReasonCode(reason)} disabled={locked} onChange={(e) => setReason(e.target.value)}>
+                    <option value="">Choose a reason</option>
+                    {CREDIT_NOTE_REASONS.map((code) => (
+                      <option key={code} value={code}>{CREDIT_NOTE_REASON_LABELS[code]}</option>
+                    ))}
+                  </select>
                 </Field>
               )}
             </div>

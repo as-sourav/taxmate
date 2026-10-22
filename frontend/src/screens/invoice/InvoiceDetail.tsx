@@ -4,10 +4,11 @@ import { useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk";
 import { DT, METHOD } from "../../lib/frappe";
 import { useDoc, useDocList } from "../../lib/resource";
 import { useSession } from "../../lib/session";
-import { canCancelSales, canSubmitSales, eInvoiceLocked } from "../../lib/roles";
+import { canCancelSales, canSubmitSales, canWrite, eInvoiceLocked } from "../../lib/roles";
 import { date, datetime, money, qty } from "../../lib/format";
 import { EINVOICE_CHIP, INV_PILL_CLASS, invoiceUiStatus, isInvoiceOverdue } from "../../lib/status";
 import { t } from "../../i18n/strings";
+import { CREDIT_NOTE_REASON_LABELS, creditNoteReasonCode } from "../../lib/creditNoteReason";
 import { TxnTotals } from "../../components/txnFields";
 import { productDiscountTotal, readDiscountBasis } from "../../lib/txn";
 import { Card, Empty, ErrorBox, Loading, PageHead, Pill, ReadRow, SumRow } from "../../components/ui";
@@ -133,7 +134,7 @@ export default function InvoiceDetail() {
      The log in particular is readable by System Manager, Accounts Manager
      and Accounts User only, so a UAE-Tax-Manager-only user sees why the
      e-invoice actions are missing rather than nothing at all.            */
-  const busyError = submitCall.error || cancelCall.error || deleteAction.error || einvoiceCall.error
+  const busyError = submitCall.error || cancelCall.error || amendCall.error || deleteAction.error || einvoiceCall.error
     || syncCall.error || fetchCall.error
     || payments.error || creditNotes.error || logs.error;
 
@@ -171,7 +172,7 @@ export default function InvoiceDetail() {
             cancelled={data.docstatus === 2}
             canSubmit={canSubmit}
             canCancel={canCancel}
-            canWrite={true}
+            canWrite={canWrite(session)}
             busy={submitCall.loading || cancelCall.loading || amendCall.loading || deleteAction.loading}
             onEdit={() => nav(`/invoices/${encodeURIComponent(name)}/edit`)}
             onSubmit={() => void submitCall.call({ doc: { doctype: DT.salesInvoice, name } }).then(refresh)}
@@ -344,7 +345,10 @@ export default function InvoiceDetail() {
                 <ReadRow k={t("txn.totalAdvance")} v={money(data.total_advance)} />
               ) : null}
               {!!data.is_return && (
-                <ReadRow k={t("inv.reason")} v={data.uae_credit_note_reason || "—"} />
+                <ReadRow k={t("inv.reason")} v={(() => {
+                  const code = creditNoteReasonCode(data.uae_credit_note_reason);
+                  return code ? CREDIT_NOTE_REASON_LABELS[code] : (data.uae_credit_note_reason || "—");
+                })()} />
               )}
             </div>
           </Card>

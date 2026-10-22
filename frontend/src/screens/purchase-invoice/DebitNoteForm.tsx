@@ -16,6 +16,7 @@ import { useSession } from "../../lib/session";
 import { money } from "../../lib/format";
 import { applyReturnQty, useTotalsPreview, useTransactionRpc } from "../../lib/txn";
 import { t } from "../../i18n/strings";
+import { CREDIT_NOTE_REASON_LABELS, CREDIT_NOTE_REASONS, creditNoteReasonCode } from "../../lib/creditNoteReason";
 import { Card, ErrorBox, Field, Loading, PageHead } from "../../components/ui";
 import { FormLayout } from "../../components/form";
 import { TxnTotals } from "../../components/txnFields";
@@ -50,6 +51,7 @@ export default function DebitNoteForm() {
   const make = useFrappePostCall<{ message: ReturnDoc }>(METHOD.makePurchaseReturn);
   const create = useInsert();
   const [draft, setDraft] = useState<ReturnDoc | null>(null);
+  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
   const { previewTotals } = useTransactionRpc({
@@ -79,10 +81,18 @@ export default function DebitNoteForm() {
 
   async function save() {
     if (!draft) return;
+    if (!creditNoteReasonCode(reason)) {
+      setSaveError({ message: t("inv.reasonRequired") });
+      return;
+    }
     setBusy(true);
     setSaveError(null);
     try {
-      const body: Record<string, unknown> = { ...draft, doctype: DT.purchaseInvoice };
+      const body: Record<string, unknown> = {
+        ...draft,
+        doctype: DT.purchaseInvoice,
+        uae_credit_note_reason: reason,
+      };
       delete body.name;
       delete body.__islocal;
       delete body.__unsaved;
@@ -118,7 +128,7 @@ export default function DebitNoteForm() {
             <button type="button" className="btn ghost" onClick={() => nav(`/purchase-invoices/${encodeURIComponent(name)}`)}>
               {t("soc.discard")}
             </button>
-            <button type="button" className="btn" disabled={busy || !draft} onClick={() => void save()}>
+            <button type="button" className="btn" disabled={busy || !draft || !creditNoteReasonCode(reason)} onClick={() => void save()}>
               {busy ? t("soc.saving") : t("soc.save")}
             </button>
           </>
@@ -143,6 +153,16 @@ export default function DebitNoteForm() {
           </Card>
         }
       >
+      <Card title={t("inv.reason")}>
+        <Field label={t("inv.reason")} required hint={t("inv.reasonHint")}>
+          <select className="ctl" value={creditNoteReasonCode(reason)} onChange={(e) => setReason(e.target.value)}>
+            <option value="">Choose a reason</option>
+            {CREDIT_NOTE_REASONS.map((code) => (
+              <option key={code} value={code}>{CREDIT_NOTE_REASON_LABELS[code]}</option>
+            ))}
+          </select>
+        </Field>
+      </Card>
       <Card title={t("inv.lines")} bodyClass={null}>
         {/* The returned item and its Quantity and Amount on the face of a
             phone card; the rate comes from the invoice being returned and is

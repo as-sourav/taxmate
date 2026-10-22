@@ -10,6 +10,7 @@ import { canOpenPosNext, canViewTeam } from "../lib/roles";
 import { buildNav, groupedNav, groupForPath, FeatureFlags } from "../lib/nav";
 import { t } from "../i18n/strings";
 import GlobalSearch from "./GlobalSearch";
+import Notifications from "./Notifications";
 import UserMenu from "./UserMenu";
 import CompanySwitcher from "./CompanySwitcher";
 import MobileNav, { useIsMobileShell } from "./MobileNav";
@@ -191,6 +192,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="tright">
             <div className="tools">
               <CaptureDesk />
+              <Notifications />
               <button
                 type="button"
                 className="langbtn"

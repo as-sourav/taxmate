@@ -52,6 +52,7 @@ export default function AssetDetail() {
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.asset, name);
   const submitCall = useFrappePostCall(METHOD.submit);
   const cancelCall = useFrappePostCall(METHOD.cancel);
+  const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<unknown>(null);
   const canSubmit = canSubmitSales(session.roles);
@@ -80,6 +81,16 @@ export default function AssetDetail() {
     } catch (e) { setActionError(e); } finally { setBusy(false); }
   }
 
+  async function handleAmend() {
+    setBusy(true); setActionError(null);
+    try {
+      const res = await amendCall.call({ doctype: DT.asset, name });
+      const next = res?.message?.name;
+      if (next) nav(`/assets/${encodeURIComponent(next)}`);
+      else mutate();
+    } catch (e) { setActionError(e); } finally { setBusy(false); }
+  }
+
   return (
     <>
       <PageHead
@@ -99,6 +110,7 @@ export default function AssetDetail() {
             onSubmit={handleSubmit}
             onDelete={deleteAction.onDelete}
             onCancel={handleCancel}
+            onAmend={handleAmend}
             busy={busy || deleteAction.loading}
           />
         }

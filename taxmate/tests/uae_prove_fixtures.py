@@ -211,7 +211,7 @@ def build_prove_set(company: str, period_start: str = PERIOD_START) -> dict:
 		qty=-1,
 		is_return=1,
 		return_against=standard.name,
-		uae_credit_note_reason="Goods returned",
+		uae_credit_note_reason="GOODS_OR_SERVICES_RETURNED",
 		posting_date=period_start,
 	)
 

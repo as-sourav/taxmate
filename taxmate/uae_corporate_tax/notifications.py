@@ -29,14 +29,22 @@ def send_ct_reminders() -> None:
 		due = getdate(draft.filing_due_date)
 		if today < add_days(due, -lead_days):
 			continue
-		state = _("Overdue") if today > due else _("Due")
 		_raise_todo_once(
 			draft.name,
-			_(
-				"Corporate Tax for {0} (period ending {1}) is {2}. Due {3}. "
-				"Prepare the accountant pack and file on the FTA portal; submitting the log does not e-file."
-			).format(draft.company, draft.period_end, state, draft.filing_due_date),
+			corporate_tax_reminder_text(
+				draft.company, draft.period_end, draft.filing_due_date, today=today
+			),
 		)
+
+
+def corporate_tax_reminder_text(company, period_end, due, today=None) -> str:
+	today = getdate(today or nowdate())
+	due_date = getdate(due)
+	state = _("Overdue") if today > due_date else _("Due")
+	return _(
+		"Corporate Tax for {0} (period ending {1}) is {2}. Due {3}. "
+		"Prepare the accountant pack and file on the FTA portal; submitting the log does not e-file."
+	).format(company, period_end, state, due)
 
 
 def _raise_todo_once(name: str, description: str) -> None:

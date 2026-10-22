@@ -9,7 +9,7 @@ import { useFrappePostCall } from "frappe-react-sdk";
 import { DT, METHOD } from "../../lib/frappe";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
-import { canCancelSales, canSubmitSales } from "../../lib/roles";
+import { canCancelSales, canSubmitSales, canWrite } from "../../lib/roles";
 import { date, money, qty } from "../../lib/format";
 import { t } from "../../i18n/strings";
 import { TxnTotals } from "../../components/txnFields";
@@ -95,7 +95,7 @@ export default function QuotationDetail() {
             cancelled={data.docstatus === 2}
             canSubmit={canSubmit}
             canCancel={canCancel}
-            canWrite={true}
+            canWrite={canWrite(session)}
             busy={submitCall.loading || cancelCall.loading || amendCall.loading || mapBusy || deleteAction.loading}
             onEdit={() => nav(`/quotations/${encodeURIComponent(name)}/edit`)}
             onSubmit={() => void submitCall.call({ doc: { doctype: DT.quotation, name } }).then(() => mutate())}
@@ -132,8 +132,8 @@ export default function QuotationDetail() {
         </p>
       </PageHead>
 
-      {(submitCall.error || cancelCall.error || mapError) && (
-        <ErrorBox error={submitCall.error || cancelCall.error || mapError} />
+      {(submitCall.error || cancelCall.error || amendCall.error || mapError) && (
+        <ErrorBox error={submitCall.error || cancelCall.error || amendCall.error || mapError} />
       )}
 
       <FormLayout aside={

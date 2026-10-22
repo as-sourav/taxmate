@@ -87,7 +87,7 @@ export default function PurchaseReceiptDetail() {
   const canSubmit = canSubmitSales(session.roles);
   const canCancel = canCancelSales(session.roles);
   const writable = canWrite(session);
-  const busyError = deleteAction.error || submitCall.error || cancelCall.error || makePi.error || mapError;
+  const busyError = deleteAction.error || submitCall.error || cancelCall.error || amendCall.error || makePi.error || mapError;
 
   return (
     <>

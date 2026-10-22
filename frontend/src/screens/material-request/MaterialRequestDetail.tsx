@@ -11,6 +11,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { confirmCancel } from "../../lib/workflow";
 import { useDeleteDraftAction } from "../../lib/useDraftDelete";
 import { useDoc, useInsert } from "../../lib/resource";
 import { useSession } from "../../lib/session";
@@ -63,6 +64,7 @@ export default function MaterialRequestDetail() {
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.materialRequest, name);
   const submitCall = useFrappePostCall(METHOD.submit);
   const cancelCall = useFrappePostCall(METHOD.cancel);
+  const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
   const makePO = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeMrPO);
   const suppliersCall = useFrappePostCall<{ message: Omit<PendingRow, "qty">[] }>(METHOD.mrDefaultSuppliers);
   const makeMany = useFrappePostCall<{ message: string[] }>(METHOD.makeMrPOs);
@@ -190,7 +192,7 @@ export default function MaterialRequestDetail() {
             )}
             {draft && canSubmit && (
               <button type="button" className="btn" disabled={submitCall.loading}
-                onClick={() => void submitCall.call({ doc: { doctype: DT.materialRequest, name } }).then(() => mutate())}>
+                onClick={() => void submitCall.call({ doc: { doctype: DT.materialRequest, name } }).then(() => mutate()).catch(() => undefined)}>
                 {t("inv.submit")}
               </button>
             )}
@@ -208,8 +210,21 @@ export default function MaterialRequestDetail() {
             )}
             {submitted && canCancel && (
               <button type="button" className="btn quiet" disabled={cancelCall.loading}
-                onClick={() => void cancelCall.call({ doctype: DT.materialRequest, name }).then(() => mutate())}>
+                onClick={() => {
+                  if (!confirmCancel(name)) return;
+                  void cancelCall.call({ doctype: DT.materialRequest, name }).then(() => mutate()).catch(() => undefined);
+                }}>
                 {t("inv.cancel")}
+              </button>
+            )}
+            {data.docstatus === 2 && canSubmit && (
+              <button type="button" className="btn ghost" disabled={amendCall.loading}
+                onClick={() => void amendCall.call({ doctype: DT.materialRequest, name }).then((res) => {
+                  const next = res?.message?.name;
+                  if (next) nav(`/material-requests/${encodeURIComponent(next)}`);
+                  else mutate();
+                }).catch(() => undefined)}>
+                {amendCall.loading ? t("soc.saving") : t("inv.amend")}
               </button>
             )}
           </>
@@ -221,8 +236,8 @@ export default function MaterialRequestDetail() {
         </p>
       </PageHead>
 
-      {(submitCall.error || cancelCall.error || mapError) && (
-        <ErrorBox error={submitCall.error || cancelCall.error || mapError} />
+      {(submitCall.error || cancelCall.error || amendCall.error || mapError) && (
+        <ErrorBox error={submitCall.error || cancelCall.error || amendCall.error || mapError} />
       )}
 
       <div className="ftabs" role="tablist">

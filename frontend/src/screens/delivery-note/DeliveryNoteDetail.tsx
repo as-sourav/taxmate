@@ -107,7 +107,7 @@ export default function DeliveryNoteDetail() {
   const canSubmit = canSubmitSales(session.roles);
   const canCancel = canCancelSales(session.roles);
   const writable = canWrite(session);
-  const busyError = deleteAction.error || submitCall.error || cancelCall.error || makeSi.error || makePickList.error || mapError;
+  const busyError = deleteAction.error || submitCall.error || cancelCall.error || amendCall.error || makeSi.error || makePickList.error || mapError;
 
   return (
     <>
