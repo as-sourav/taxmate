@@ -283,8 +283,23 @@ def _plain_detail(detail: str) -> str | None:
 
 
 def _tool_error(result) -> dict:
-	detail = getattr(result, "error", None) or ""
-	return {"ok": False, "error_key": "idp.readFailed", "detail": _plain_detail(str(detail))}
+	"""A failed save is not a failed read.
+
+	create_document turns an empty PermissionError into the literal
+	"permission denied". The file was already read. Caller: _save_create.
+	"""
+	detail = _plain_detail(str(getattr(result, "error", None) or ""))
+	code = str(getattr(result, "error_code", None) or "")
+	if code == "PERMISSION_DENIED" or (detail or "").lower() == "permission denied":
+		return {
+			"ok": False,
+			"error_key": "idp.propose.failed",
+			"detail": (
+				"This draft was not saved. A supplier, customer, or item on it "
+				"belongs to another company. Save the draft again."
+			),
+		}
+	return {"ok": False, "error_key": "idp.propose.failed", "detail": detail}
 
 
 def _open_draft(doctype: str, name: str) -> dict | None:
@@ -665,13 +680,16 @@ def _save_create(
 ) -> dict:
 	from taxmate.idp import scan as scan_mod
 	from taxmate.idp.masters import (
+		align_scanned_items,
 		apply_created_links,
 		build_proposals,
 		create_confirmed,
 		merge_proposal_values,
+		party_proposals_for_company,
 		proposals_complete,
 		release_address_links,
 		release_currency_company,
+		scope_extract_to_company,
 		split_missing,
 	)
 
@@ -696,6 +714,8 @@ def _save_create(
 	file_url = file_url or scan_doc.file_url or ""
 	release_currency_company(extracted)
 	release_address_links(extracted)
+	# Another company's supplier/item must not ride into this draft.
+	scope_extract_to_company(extracted)
 	_creatable, blocked = split_missing((extracted.get("validation") or {}).get("missing_masters"))
 	if blocked:
 		named = []
@@ -719,6 +739,20 @@ def _save_create(
 		pending = merge_proposal_values(build_proposals(extracted), client_props)
 	if pending:
 		made = create_confirmed(pending)
+		if not made.get("ok"):
+			return {
+				"ok": False,
+				"error_key": made.get("error_key") or "idp.propose.failed",
+				"detail": made.get("detail"),
+			}
+		apply_created_links(extracted, made.get("created") or {})
+		_refresh_validation(extracted)
+		release_address_links(extracted)
+	align_scanned_items(extracted)
+	scope_extract_to_company(extracted)
+	extras = party_proposals_for_company(extracted)
+	if extras:
+		made = create_confirmed(extras)
 		if not made.get("ok"):
 			return {
 				"ok": False,

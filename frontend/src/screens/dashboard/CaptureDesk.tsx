@@ -456,11 +456,12 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         return;
       }
       // Keep the review cards; only stamp the save failure so the foot can show it.
+      // Caller: Save draft button. The file is already read; do not call that a read failure.
       setReview((prev) => ({
         ...(prev || {}),
         ...result,
         ok: false,
-        error_key: result.error_key || "idp.readFailed",
+        error_key: result.error_key || "idp.propose.failed",
         detail: result.detail,
         lines: result.lines ?? prev?.lines,
         items: result.items ?? prev?.items,
@@ -470,6 +471,9 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         can_submit: prev?.can_submit,
         save_key: prev?.save_key,
       }));
+      requestAnimationFrame(() => {
+        document.getElementById("idp-save-error")?.focus();
+      });
     } catch (err) {
       if (ac.signal.aborted) return;
       setReview((prev) => ({
@@ -763,7 +767,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         {showReviewFoot && review ? (
           <div className="idp-foot">
             {review.error_key && !review.ok && scanHasContent(review, proposals) ? (
-              <p className="idp-err" role="alert">
+              <p id="idp-save-error" className="idp-err" role="alert" tabIndex={-1}>
                 {formatScanError(review)}
               </p>
             ) : null}
@@ -1158,9 +1162,14 @@ function plainDetail(detail: string): string {
 }
 
 function formatScanError(review: Review): string {
+  const detail = plainDetail((review.detail || "").trim());
+  // The file was read. Saying it could not be read hides the real save failure.
+  if (detail && /this draft was not saved/i.test(detail)) return detail;
+  if (detail && review.error_key === "idp.readFailed" && /permission denied/i.test(detail)) {
+    return "This draft was not saved. A supplier, customer, or item on it belongs to another company. Save the draft again.";
+  }
   const head = review.error_key ? t(review.error_key) : "";
   const hint = review.detail_key ? t(review.detail_key) : "";
-  const detail = plainDetail((review.detail || "").trim());
   const parts: string[] = [];
   if (head) parts.push(head);
   for (const part of [hint, detail]) {

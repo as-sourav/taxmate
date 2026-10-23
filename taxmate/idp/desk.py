@@ -778,6 +778,7 @@ def review_from_extract(extracted: dict[str, Any], *, route: str | None) -> dict
 		build_proposals,
 		release_address_links,
 		release_currency_company,
+		scope_extract_to_company,
 		split_missing,
 	)
 
@@ -793,6 +794,7 @@ def review_from_extract(extracted: dict[str, Any], *, route: str | None) -> dict
 		}
 	release_currency_company(extracted)
 	release_address_links(extracted)
+	scope_extract_to_company(extracted)
 	data = extracted.get("extracted_data") or {}
 	header = _header_rows(data.get("header") or {})
 	lines = [{"label_key": label_key_for(key), "value": str(value)} for key, value in header.items()]

@@ -47,19 +47,22 @@ def find_ready_scan(
 	target_doctype: str,
 	pipeline_version: int = PIPELINE_VERSION,
 ) -> str | None:
-	"""Return existing Ready scan name for same bytes + target + version."""
+	"""Return this user's Ready scan for the same bytes, target, version, and company.
+
+	Caller: idp_desk._run_create. Two clerks uploading the same file must not share a scan.
+	"""
 	try:
-		name = frappe.db.get_value(
-			SCAN_DOCTYPE,
-			{
-				"file_sha256": file_sha256_hex,
-				"target_doctype": target_doctype,
-				"pipeline_version": pipeline_version,
-				"status": READY,
-				"user": frappe.session.user,
-			},
-			"name",
-		)
+		filters: dict[str, Any] = {
+			"file_sha256": file_sha256_hex,
+			"target_doctype": target_doctype,
+			"pipeline_version": pipeline_version,
+			"status": READY,
+			"user": frappe.session.user,
+		}
+		company = get_default_company()
+		if company:
+			filters["company"] = company
+		name = frappe.db.get_value(SCAN_DOCTYPE, filters, "name")
 	except Exception:
 		# Schema may lag (missing Scan columns on an older IDP install).
 		frappe.clear_last_message()
