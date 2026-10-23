@@ -27,6 +27,10 @@ svg{display:block}
   padding:0; display:flex; flex-direction:column;
   position:sticky; top:env(safe-area-inset-top, 0px); height:100dvh;
   overflow:hidden; flex:none;
+  /* Sticky plus overflow paints the collapsed flyout inside the rail's layer,
+     so the dashboard cards (later in the tree) covered it. Sit above the
+     topbar (20) and below dialogs (80+). */
+  z-index:30;
 }
 .rbrand{padding:14px 12px 10px; flex:none}
 .rail-body{flex:1; overflow-y:auto; overflow-x:hidden; padding:0 12px 14px; display:flex; flex-direction:column; gap:2px; min-height:0}
