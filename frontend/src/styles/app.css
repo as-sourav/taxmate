@@ -49,14 +49,17 @@ svg{display:block}
 .rlink.on{background:var(--brand-soft); color:var(--brand); font-weight:600}
 /* Lucide icon wrapper: flex-center so SVGs sit precisely */
 .rlink .ic{width:18px; height:18px; flex:none; display:flex; align-items:center; justify-content:center; color:inherit}
-.app.collapsed .rlink{justify-content:center; padding-inline:0}
-.app.collapsed .rlink span:not(.ic){display:none}
-.app.collapsed .rlink:hover::after{
+.app.collapsed .rail-body > .rlink{
+  justify-content:center; width:44px; height:44px; margin-inline:auto; padding:0; border-radius:10px;
+}
+.app.collapsed .rail-body > .rlink span:not(.ic){display:none}
+.app.collapsed .rail-body > .rlink:hover::after{
   content:attr(data-tip); position:absolute; inset-inline-start:calc(100% + 10px); top:50%; transform:translateY(-50%);
   background:var(--text); color:var(--surface); font-size:12px; font-weight:500; padding:5px 10px; border-radius:6px;
   white-space:nowrap; z-index:40; pointer-events:none; box-shadow:0 4px 12px rgba(0,0,0,.18);
 }
-[dir="rtl"] .app.collapsed .rlink:hover::after{inset-inline-start:auto; inset-inline-end:calc(100% + 10px)}
+[dir="rtl"] .app.collapsed .rail-body > .rlink:hover::after{inset-inline-start:auto; inset-inline-end:calc(100% + 10px)}
+.app.collapsed .rfly .rlink{justify-content:flex-start; width:auto; height:auto; margin:0; padding:8px 10px}
 /* Importers: AppShell grouped rail. Schema: button.rsec + .rgroup.
    Closed groups use the same slate as links so they stay readable. */
 .rsec{
@@ -73,7 +76,20 @@ svg{display:block}
 .rsec[aria-expanded="true"] .chev{transform:rotate(90deg)}
 [dir="rtl"] .rsec[aria-expanded="true"] .chev{transform:rotate(-90deg)}
 .rgroup{display:flex; flex-direction:column; gap:2px}
-.app.collapsed .rsec{display:none}
+.app.collapsed .rgroup:first-of-type{margin-top:8px; padding-top:8px; border-top:1px solid var(--border)}
+.app.collapsed .rsec.ricon{
+  justify-content:center; width:44px; height:44px; margin-inline:auto; margin-block-start:4px; padding:0; border-radius:10px;
+}
+.app.collapsed .rsec.ricon .ic{width:18px; height:18px; display:flex; align-items:center; justify-content:center}
+.app.collapsed .rsec.ricon.on,
+.app.collapsed .rsec.ricon[aria-expanded="true"]{background:var(--brand-soft); color:var(--brand)}
+.rfly{
+  position:fixed; z-index:45; width:232px; overflow:auto;
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  box-shadow:0 16px 40px color-mix(in srgb, var(--text) 14%, transparent);
+  padding:8px;
+}
+.rfly-title{font-size:13px; font-weight:600; color:var(--text); padding:6px 10px 8px}
 .rfoot{margin-block-start:auto; border-block-start:1px solid var(--border); padding-block-start:13px; display:flex; align-items:center; gap:10px; padding:10px 6px 2px; font-size:12px; color:var(--muted); white-space:nowrap; text-decoration:none; border-radius:9px}
 .rfoot:hover{background:var(--hover); color:var(--muted)}
 .rfoot.on{background:var(--brand-soft)}
