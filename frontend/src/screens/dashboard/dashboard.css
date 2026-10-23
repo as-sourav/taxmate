@@ -537,11 +537,13 @@ div.od-cmp-i:hover{background:transparent}
 .idp-consent input{
   width:18px; height:18px; margin-block-start:1px; flex:none; accent-color:var(--brand);
 }
-.idp-fields{display:flex; flex-direction:column; gap:10px}
-.idp-field{display:flex; flex-direction:column; gap:5px; margin:0; font-size:13px}
+.idp-card > .idp-fields{padding:12px 14px 14px}
+.idp-fields{display:flex; flex-direction:column; gap:10px; min-width:0}
+.idp-field{display:flex; flex-direction:column; gap:5px; margin:0; font-size:13px; min-width:0}
 .idp-field-label{font-size:12px; font-weight:600; color:var(--muted)}
 .idp-field input,
 .idp-field select{
+  width:100%; max-width:100%;
   border:1px solid var(--border); background:var(--input); color:var(--text);
   border-radius:var(--r-sm); padding:10px 12px; font:inherit; min-height:44px;
 }

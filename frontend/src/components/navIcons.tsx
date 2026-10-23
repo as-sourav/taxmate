@@ -79,6 +79,22 @@ function ico(C: LucideIcon): ReactNode {
   return <C size={SZ} strokeWidth={SW} aria-hidden="true" />;
 }
 
+/** One glyph per sidebar section, used when the rail is icon-only. */
+export function sectionIcon(key: string): ReactNode {
+  switch (key) {
+    case "nav.sales": return ico(ShoppingBag);
+    case "nav.purchase": return ico(ShoppingCart);
+    case "nav.stock": return ico(Warehouse);
+    case "nav.accounting": return ico(Landmark);
+    case "nav.masters": return ico(Tags);
+    case "nav.compliance": return ico(Shield);
+    case "nav.pos": return ico(Store);
+    case "nav.fixedAssets": return ico(Boxes);
+    case "nav.company": return ico(Building2);
+    default: return ico(CircleDot);
+  }
+}
+
 /** Lucide glyph for a rail route. Never returns null — keeps columns aligned. */
 export function navIcon(to: string): ReactNode {
   switch (to) {

@@ -745,6 +745,12 @@ def finish_draft(
 			row["uom"] = uoms[code]
 		if income and not row.get("income_account"):
 			row["income_account"] = income
+	expense = str(defaults.get("expense_account") or "")
+	for row in rows:
+		if isinstance(row, dict) and expense and not row.get("expense_account"):
+			row["expense_account"] = expense
+	if not out.get("buying_price_list") and defaults.get("buying_price_list"):
+		out["buying_price_list"] = str(defaults["buying_price_list"])
 	return out, rows
 
 
@@ -794,9 +800,14 @@ def review_from_extract(extracted: dict[str, Any], *, route: str | None) -> dict
 	for row in data.get("items") or []:
 		if not isinstance(row, dict):
 			continue
-		label = row.get("item_name") or row.get("item_code") or row.get("description") or ""
+		code = str(row.get("item_code") or "").strip()
+		name = str(row.get("item_name") or row.get("description") or "").strip()
+		if code and name and code.lower() != name.lower():
+			label = f"{code} — {name}"
+		else:
+			label = name or code
 		if label:
-			items.append({"label": str(label)})
+			items.append({"label": label})
 	validation = extracted.get("validation") or {}
 	missing = validation.get("missing_masters") or []
 	_creatable, blocked = split_missing(missing)

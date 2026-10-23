@@ -56,6 +56,30 @@ LEGACY_DESK_ROLES: frozenset[str] = frozenset(
 	}
 )
 
+# Desk roles spa_roles_of already treats as TaxMate roles. Custom DocPerm
+# follows that map. ERPNext does not give Accounts Manager a Quotation row,
+# so the sidebar list fails with Insufficient Permission.
+_DESK_SPA: dict[str, str] = {
+	"Accounts Manager": "accountant",
+	"UAE Tax Manager": "accountant",
+	"Accounts User": "clerk",
+}
+
+# Sidebar documents the search catalog does not name. Same DocPerm sync.
+_SPA_BOOKS: tuple[str, ...] = (
+	"Lead",
+	"Supplier Quotation",
+	"BOM",
+	"Work Order",
+	"Pick List",
+	"POS Invoice",
+	"POS Profile",
+	"Loyalty Program",
+	"Loyalty Point Entry",
+	"Asset Category",
+	"Currency Exchange",
+)
+
 MANAGED_ROLES: frozenset[str] = frozenset(
 	(*MARKER.values(), *_LEGACY_MARKER_RENAMES.keys(), *LEGACY_DESK_ROLES)
 )
@@ -221,6 +245,7 @@ def ensure_spa_roles() -> None:
 	"""Create marker roles, books DocPerms, and lock non-Admin users to the SPA."""
 	ensure_marker_roles()
 	_ensure_books_perms()
+	_ensure_scan_perms()
 	_allow_reports()
 	_strip_desk_roles_from_spa_users()
 	_lock_non_admin_users_to_spa()
@@ -437,17 +462,40 @@ def _books_perms_ready() -> bool:
 	)
 
 
+def _role_can_read(doctype: str, role: str) -> bool:
+	"""True when this role can read the DocType under Frappe's perm rule.
+
+	Any Custom DocPerm on the DocType replaces DocPerm. A row with if_owner
+	does not let the role list the company books.
+	"""
+	custom = frappe.get_all(
+		"Custom DocPerm",
+		filters={"parent": doctype, "permlevel": 0},
+		fields=["role", "read", "if_owner"],
+		limit=500,
+	)
+	rows = custom or frappe.get_all(
+		"DocPerm",
+		filters={"parent": doctype, "permlevel": 0},
+		fields=["role", "read", "if_owner"],
+		limit=500,
+	)
+	return any(row.role == role and cint(row.read) and not cint(row.if_owner) for row in rows)
+
+
 def _ensure_books_perms() -> None:
-	"""Sync marker Custom DocPerms for every catalog DocType.
+	"""Sync Custom DocPerms for catalog DocTypes and the desk roles the SPA maps.
 
 	``_books_perms_ready`` only samples Sales Invoice / Journal Entry. New
-	catalog DocTypes (IDP, Item Attribute, …) must still get rows even when
-	that sample already looks correct.
+	catalog DocTypes must still get rows even when that sample already looks
+	correct. Accounts Manager is an accountant in the SPA but ERPNext does
+	not grant Quotation, so that role gets the accountant flags where it
+	cannot already read.
 	"""
 	from frappe.permissions import setup_custom_perms
 
 	refresh_flags = not _books_perms_ready()
-	names = list(dict.fromkeys([*_catalog_names(), *VIEWER_READ_DOCTYPES]))
+	names = list(dict.fromkeys([*_catalog_names(), *VIEWER_READ_DOCTYPES, *_SPA_BOOKS]))
 	changed = False
 	for doctype in names:
 		if not frappe.db.exists("DocType", doctype):
@@ -501,7 +549,112 @@ def _ensure_books_perms() -> None:
 					changed = True
 			except Exception:
 				frappe.log_error(title=f"TaxMate perm failed: {role} / {doctype}")
+		for role, spa in _DESK_SPA.items():
+			if not frappe.db.exists("Role", role):
+				continue
+			if _role_can_read(doctype, role):
+				continue
+			flags = _perm_values(spa, doctype)
+			existing = frappe.db.get_value(
+				"Custom DocPerm",
+				{"parent": doctype, "role": role, "permlevel": 0, "if_owner": 0},
+			)
+			try:
+				if existing:
+					frappe.db.set_value("Custom DocPerm", existing, flags, update_modified=False)
+				else:
+					frappe.get_doc(
+						{
+							"doctype": "Custom DocPerm",
+							"parent": doctype,
+							"parenttype": "DocType",
+							"parentfield": "permissions",
+							"role": role,
+							"permlevel": 0,
+							"if_owner": 0,
+							**flags,
+						}
+					).insert(ignore_permissions=True)
+				changed = True
+			except Exception:
+				frappe.log_error(title=f"TaxMate desk perm failed: {role} / {doctype}")
 	if changed or refresh_flags:
+		frappe.clear_cache()
+
+
+# People who can create an invoice may store the scan that produced it.
+# if_owner keeps each person on their own log. Create stays available:
+# Frappe does not require ownership for a new row.
+_SCAN_LOG = "IDP Document Log"
+_SCAN_ROLES: tuple[str, ...] = (
+	"TaxMate Owner",
+	"TaxMate Accountant",
+	"TaxMate Accounts User",
+	"Accounts Manager",
+	"Accounts User",
+	"Purchase Manager",
+	"Purchase User",
+	"Sales Manager",
+	"Sales User",
+)
+
+
+def _ensure_scan_perms() -> None:
+	"""Let invoice roles create and update their own IDP Document Log rows."""
+	if not frappe.db.exists("DocType", _SCAN_LOG):
+		return
+	from frappe.permissions import setup_custom_perms
+
+	try:
+		setup_custom_perms(_SCAN_LOG)
+	except Exception:
+		frappe.log_error(title="TaxMate scan perm copy failed")
+	flags = {
+		"select": 1,
+		"read": 1,
+		"write": 1,
+		"create": 1,
+		"delete": 0,
+		"submit": 0,
+		"cancel": 0,
+		"amend": 0,
+		"report": 0,
+		"export": 0,
+		"import": 0,
+		"share": 0,
+		"print": 0,
+		"email": 0,
+	}
+	changed = False
+	for role in _SCAN_ROLES:
+		if not frappe.db.exists("Role", role):
+			continue
+		existing = frappe.db.get_value(
+			"Custom DocPerm",
+			{"parent": _SCAN_LOG, "role": role, "permlevel": 0, "if_owner": 1},
+		)
+		try:
+			if existing:
+				if not cint(frappe.db.get_value("Custom DocPerm", existing, "create")):
+					frappe.db.set_value("Custom DocPerm", existing, flags, update_modified=False)
+					changed = True
+			else:
+				frappe.get_doc(
+					{
+						"doctype": "Custom DocPerm",
+						"parent": _SCAN_LOG,
+						"parenttype": "DocType",
+						"parentfield": "permissions",
+						"role": role,
+						"permlevel": 0,
+						"if_owner": 1,
+						**flags,
+					}
+				).insert(ignore_permissions=True)
+				changed = True
+		except Exception:
+			frappe.log_error(title=f"TaxMate scan perm failed: {role}")
+	if changed:
 		frappe.clear_cache()
 
 

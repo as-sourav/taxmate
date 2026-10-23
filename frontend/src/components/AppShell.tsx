@@ -1,13 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useFrappeGetCall } from "frappe-react-sdk";
 
-import { useSwitchLang } from "../lib/useSwitchLang";
-import { appearance } from "../lib/theme";
-import { persistThemeToggle } from "../lib/uiPrefs";
+import { useLang } from "../lib/i18n";
 import { useSession } from "../lib/session";
 import { canOpenPosNext, canViewTeam } from "../lib/roles";
-import { buildNav, groupedNav, groupForPath, FeatureFlags } from "../lib/nav";
+import { buildNav, groupedNav, groupForPath, FeatureFlags, type NavLinkItem } from "../lib/nav";
 import { t } from "../i18n/strings";
 import GlobalSearch from "./GlobalSearch";
 import Notifications from "./Notifications";
@@ -15,11 +13,59 @@ import UserMenu from "./UserMenu";
 import CompanySwitcher from "./CompanySwitcher";
 import MobileNav, { useIsMobileShell } from "./MobileNav";
 import "../styles/phone-fixes.css";
-import { navIcon } from "./navIcons";
+import { navIcon, sectionIcon } from "./navIcons";
 import { CaptureDesk } from "../screens/dashboard/CaptureDesk";
 
 const RAIL_KEY = "taxmate-rail";
 const OPEN_KEY = "taxmate-nav-open";
+
+type FlyPlace = { key: string; top: number; maxHeight: number; edge: number; rtl: boolean };
+
+function placeFly(el: HTMLElement, key: string): FlyPlace {
+  const rect = el.getBoundingClientRect();
+  const rtl = document.documentElement.dir === "rtl";
+  const desired = 360;
+  let top = rect.top;
+  let maxHeight = window.innerHeight - top - 12;
+  if (maxHeight < Math.min(desired, 220)) {
+    top = Math.max(8, window.innerHeight - 12 - desired);
+    maxHeight = window.innerHeight - top - 12;
+  }
+  return {
+    key,
+    top,
+    maxHeight,
+    edge: rtl ? window.innerWidth - rect.left + 10 : rect.right + 10,
+    rtl,
+  };
+}
+
+function RailLink({ n, tip }: { n: NavLinkItem; tip: boolean }) {
+  const label = t(n.key);
+  const body = (
+    <>
+      <span className="ic">{navIcon("href" in n ? n.href : n.to)}</span>
+      <span>{label}</span>
+    </>
+  );
+  if ("href" in n) {
+    return (
+      <a href={n.href} data-tip={tip ? label : undefined} className="rlink">
+        {body}
+      </a>
+    );
+  }
+  return (
+    <NavLink
+      to={n.to}
+      end={n.to === "/"}
+      data-tip={tip ? label : undefined}
+      className={({ isActive }) => `rlink${isActive ? " on" : ""}`}
+    >
+      {body}
+    </NavLink>
+  );
+}
 
 function loadOpen(): Record<string, boolean> {
   try {
@@ -43,18 +89,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       return !c;
     });
   }
-  const { lang, toggle: switchLang } = useSwitchLang();
-  const [mode, setMode] = useState(appearance);
-  useEffect(() => {
-    const mq = matchMedia("(prefers-color-scheme: dark)");
-    const sync = () => setMode(appearance());
-    mq.addEventListener("change", sync);
-    window.addEventListener("taxmate-theme", sync);
-    return () => {
-      mq.removeEventListener("change", sync);
-      window.removeEventListener("taxmate-theme", sync);
-    };
-  }, []);
+  const { lang } = useLang();
   /**
    * Below 900px the rail is replaced by MobileNav's bottom tab bar. Decided in
    * JS rather than CSS so only one of the two is ever in the DOM — a hidden
@@ -84,6 +119,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     });
   const { top, groups } = useMemo(() => groupedNav(nav), [nav]);
   const activeGroup = groupForPath(groups, location.pathname);
+  const [fly, setFly] = useState<FlyPlace | null>(null);
+  const closeFly = useRef<number | null>(null);
+
+  function holdFly() {
+    if (closeFly.current) window.clearTimeout(closeFly.current);
+    closeFly.current = null;
+  }
+  function queueFlyClose() {
+    holdFly();
+    closeFly.current = window.setTimeout(() => setFly(null), 140);
+  }
+  function openFly(key: string, el: HTMLElement) {
+    if (!collapsed) return;
+    holdFly();
+    setFly(placeFly(el, key));
+  }
 
   useEffect(() => {
     try { localStorage.setItem(RAIL_KEY, collapsed ? "1" : "0"); } catch { /* ignore */ }
@@ -98,6 +149,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     try { localStorage.setItem(OPEN_KEY, JSON.stringify(open)); } catch { /* ignore */ }
   }, [open]);
 
+  useEffect(() => {
+    setFly(null);
+  }, [location.pathname, collapsed]);
+
+  useEffect(() => {
+    if (!fly) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFly(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fly]);
+
   return (
     <div className={`app${collapsed && !mobile ? " collapsed" : ""}${mobile ? " has-mnav" : ""}`}>
       <a className="skip" href="#taxmate-main">{t("a11y.skip")}</a>
@@ -107,59 +169,68 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <span className="mark">T</span>
           <span>TaxMate</span>
         </div>
-        <div className="rail-body">
-        {top.map((n) =>
-          n.external ? (
-            <a key={n.href} href={n.href} data-tip={t(n.key)} className="rlink">
-              <span className="ic">{navIcon(n.href)}</span>
-              <span>{t(n.key)}</span>
-            </a>
-          ) : (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              end={n.to === "/"}
-              data-tip={t(n.key)}
-              className={({ isActive }) => `rlink${isActive ? " on" : ""}`}
-            >
-              <span className="ic">{navIcon(n.to)}</span>
-              <span>{t(n.key)}</span>
-            </NavLink>
-          )
-        )}
+        <div className="rail-body" onScroll={collapsed ? () => setFly(null) : undefined}>
+        {top.map((n) => (
+          <RailLink key={"href" in n ? n.href : n.to} n={n} tip={collapsed} />
+        ))}
 
         {groups.map((g) => {
           const expanded = !collapsed && !!open[g.key];
+          const flying = collapsed && fly?.key === g.key;
           return (
-            <div className="rgroup" key={g.key}>
-              <button
-                type="button"
-                className="rsec"
-                aria-expanded={expanded}
-                onClick={() => setOpen((prev) => ({ ...prev, [g.key]: !prev[g.key] }))}
-              >
-                <span>{t(g.key)}</span>
-                <svg className="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-                  <path d="M4 2.5 8.5 6 4 9.5" />
-                </svg>
-              </button>
-              {expanded && g.links.map((n) =>
-                n.external ? (
-                  <a key={n.href} href={n.href} data-tip={t(n.key)} className="rlink">
-                    <span className="ic">{navIcon(n.href)}</span>
-                    <span>{t(n.key)}</span>
-                  </a>
-                ) : (
-                  <NavLink
-                    key={n.to}
-                    to={n.to}
-                    data-tip={t(n.key)}
-                    className={({ isActive }) => `rlink${isActive ? " on" : ""}`}
-                  >
-                    <span className="ic">{navIcon(n.to)}</span>
-                    <span>{t(n.key)}</span>
-                  </NavLink>
-                )
+            <div
+              className="rgroup"
+              key={g.key}
+              onMouseLeave={collapsed ? queueFlyClose : undefined}
+              onBlur={collapsed ? (e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) queueFlyClose();
+              } : undefined}
+            >
+              {collapsed ? (
+                <button
+                  type="button"
+                  className={`rsec ricon${activeGroup === g.key ? " on" : ""}`}
+                  aria-expanded={flying}
+                  aria-haspopup="true"
+                  aria-label={t(g.key)}
+                  onMouseEnter={(e) => { holdFly(); openFly(g.key, e.currentTarget); }}
+                  onFocus={(e) => openFly(g.key, e.currentTarget)}
+                >
+                  <span className="ic">{sectionIcon(g.key)}</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="rsec"
+                  aria-expanded={expanded}
+                  onClick={() => setOpen((prev) => ({ ...prev, [g.key]: !prev[g.key] }))}
+                >
+                  <span>{t(g.key)}</span>
+                  <svg className="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                    <path d="M4 2.5 8.5 6 4 9.5" />
+                  </svg>
+                </button>
+              )}
+              {expanded && g.links.map((n) => (
+                <RailLink key={"href" in n ? n.href : n.to} n={n} tip={false} />
+              ))}
+              {flying && fly && (
+                <div
+                  className="rfly"
+                  role="navigation"
+                  aria-label={t(g.key)}
+                  style={{
+                    top: fly.top,
+                    maxHeight: fly.maxHeight,
+                    ...(fly.rtl ? { right: fly.edge } : { left: fly.edge }),
+                  }}
+                  onMouseEnter={holdFly}
+                >
+                  <div className="rfly-title">{t(g.key)}</div>
+                  {g.links.map((n) => (
+                    <RailLink key={"href" in n ? n.href : n.to} n={n} tip={false} />
+                  ))}
+                </div>
               )}
             </div>
           );
@@ -193,35 +264,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="tools">
               <CaptureDesk />
               <Notifications />
-              <button
-                type="button"
-                className="langbtn"
-                lang={lang === "en" ? "ar" : "en"}
-                onClick={() => {
-                  void switchLang();
-                }}
-              >
-                {lang === "en" ? "عربي" : "English"}
-              </button>
-              <button
-                type="button"
-                className="iconbtn bordered"
-                onClick={() => {
-                  void persistThemeToggle().then(() => setMode(appearance()));
-                }}
-                aria-label={mode === "dark" ? t("a11y.themeLight") : t("a11y.themeDark")}
-              >
-                {mode === "dark" ? (
-                  <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-                    <circle cx="9" cy="9" r="3.4" />
-                    <path d="M9 1.6v2M9 14.4v2M16.4 9h-2M3.6 9h-2M14.2 3.8l-1.4 1.4M5.2 12.8l-1.4 1.4M14.2 14.2l-1.4-1.4M5.2 5.2 3.8 3.8" />
-                  </svg>
-                ) : (
-                  <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-                    <path d="M14.5 11.2A6.2 6.2 0 0 1 6.8 3.5 6.4 6.4 0 1 0 14.5 11.2z" />
-                  </svg>
-                )}
-              </button>
             </div>
             <UserMenu />
           </div>
