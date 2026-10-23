@@ -119,7 +119,7 @@ _NAV_PAGES: tuple[dict[str, str], ...] = (
 		"route": "/incoming-invoices",
 		"keywords": "incoming einvoice peppol received supplier bill asp",
 	},
-	{"label": "Invoices", "route": "/invoices", "keywords": "sales invoice bill"},
+	{"label": "Sales Invoices", "route": "/invoices", "keywords": "sales invoice bill invoices"},
 	{"label": "Payments", "route": "/payments", "keywords": "payment receipt"},
 	{"label": "Receivables", "route": "/receivables", "keywords": "ar outstanding"},
 	{"label": "Payables", "route": "/payables", "keywords": "ap aged payable supplier outstanding"},

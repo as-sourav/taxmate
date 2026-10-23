@@ -25,7 +25,7 @@ class TestIdpMastersApi(FrappeTestCase):
 		item_name = f"Scan Chair {suffix}"
 		item_code = f"SCAN-{suffix[:6].upper()}"
 		digits = "".join(str(int(c, 16) % 10) for c in suffix)
-		trn = ("100" + digits + "000000000")[:15]
+		trn = ("100" + digits + "000000000")[:13] + "03"
 		proposals = [
 			{
 				"key": f"supplier:{supplier_name}",
@@ -165,3 +165,53 @@ class TestIdpMastersApi(FrappeTestCase):
 		)
 		self.assertFalse(made["ok"])
 		self.assertEqual(made["error_key"], "idp.propose.needConsent")
+
+	def test_confirmed_unit_is_created_before_the_item(self):
+		suffix = uuid.uuid4().hex[:6]
+		unit = f"Bx{suffix}"
+		item_code = f"SCAN-{suffix.upper()}"
+		proposals = [
+			{
+				"key": f"item:{item_code}",
+				"doctype": "Item",
+				"link_index": 0,
+				"confirmed": True,
+				"required_fields": [
+					{"field": "item_code", "value": item_code},
+					{"field": "item_name", "value": f"Scan goods {suffix}"},
+					{"field": "stock_uom", "value": unit},
+				],
+				"optional_fields": [],
+				"source_fields": {},
+			},
+			{
+				"key": f"uom:{unit}",
+				"doctype": "UOM",
+				"confirmed": True,
+				"required_fields": [{"field": "uom_name", "value": unit}],
+				"optional_fields": [],
+				"source_fields": {},
+			},
+		]
+		made = create_confirmed(proposals)
+		self.assertTrue(made.get("ok"), made)
+		self.assertTrue(frappe.db.exists("UOM", unit))
+		self.assertEqual(frappe.db.get_value("Item", item_code, "stock_uom"), unit)
+
+	def test_an_accounts_user_can_create_their_scan_log(self):
+		from taxmate.setup.spa_roles import _ensure_scan_perms
+
+		_ensure_scan_perms()
+		email = f"scan-{uuid.uuid4().hex[:8]}@example.com"
+		user = frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": email,
+				"first_name": "Scan",
+				"send_welcome_email": 0,
+				"roles": [{"role": "Accounts User"}],
+			}
+		)
+		user.insert(ignore_permissions=True)
+		frappe.set_user(email)
+		self.assertTrue(frappe.has_permission("IDP Document Log", "create"))

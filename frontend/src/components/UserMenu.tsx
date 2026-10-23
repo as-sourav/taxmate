@@ -5,6 +5,9 @@ import { useFrappeAuth } from "frappe-react-sdk";
 import { useSession } from "../lib/session";
 import { canManageCompany, canOpenDesk, isAppProvider, spaRoleOf } from "../lib/roles";
 import { t } from "../i18n/strings";
+import { useSwitchLang } from "../lib/useSwitchLang";
+import { appearance } from "../lib/theme";
+import { persistThemeToggle } from "../lib/uiPrefs";
 import { isNative, signalMobile } from "../mobile/platform";
 
 export default function UserMenu() {
@@ -16,6 +19,19 @@ export default function UserMenu() {
   const nav = useNavigate();
   const session = useSession();
   const { currentUser, logout } = useFrappeAuth();
+  const { lang, toggle: switchLang } = useSwitchLang();
+  const [mode, setMode] = useState(appearance);
+
+  useEffect(() => {
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => setMode(appearance());
+    mq.addEventListener("change", sync);
+    window.addEventListener("taxmate-theme", sync);
+    return () => {
+      mq.removeEventListener("change", sync);
+      window.removeEventListener("taxmate-theme", sync);
+    };
+  }, []);
 
   const provider = isAppProvider(session);
   const roleLabel = provider ? t("role.provider") : t(`role.${spaRoleOf(session)}`);
@@ -171,6 +187,49 @@ export default function UserMenu() {
               {t("user.openDesk")}
             </button>
           )}
+
+          <div className="umdrop-sep" role="separator" />
+
+          <button
+            type="button"
+            role="menuitem"
+            className="umdrop-item"
+            lang={lang === "en" ? "ar" : "en"}
+            onClick={() => {
+              void switchLang();
+            }}
+          >
+            <span className="umdrop-ic">
+              <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                <circle cx="9" cy="9" r="6.2" />
+                <path d="M3 9h12M9 2.8c1.6 1.8 2.4 4 2.4 6.2s-.8 4.4-2.4 6.2c-1.6-1.8-2.4-4-2.4-6.2s.8-4.4 2.4-6.2z" />
+              </svg>
+            </span>
+            {lang === "en" ? "عربي" : "English"}
+          </button>
+
+          <button
+            type="button"
+            role="menuitem"
+            className="umdrop-item"
+            onClick={() => {
+              void persistThemeToggle().then(() => setMode(appearance()));
+            }}
+          >
+            <span className="umdrop-ic">
+              {mode === "dark" ? (
+                <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                  <circle cx="9" cy="9" r="3.2" />
+                  <path d="M9 1.8v1.6M9 14.6v1.6M16.2 9h-1.6M3.4 9H1.8M14.1 3.9l-1.1 1.1M5 13l-1.1 1.1M14.1 14.1 13 13M5 5 3.9 3.9" />
+                </svg>
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                  <path d="M14.5 11.2A6.2 6.2 0 0 1 6.8 3.5 6.4 6.4 0 1 0 14.5 11.2z" />
+                </svg>
+              )}
+            </span>
+            {mode === "dark" ? t("a11y.themeLight") : t("a11y.themeDark")}
+          </button>
 
           <div className="umdrop-sep" role="separator" />
 
