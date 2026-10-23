@@ -269,9 +269,22 @@ def _context(doctype: str, language: str):
 	)
 
 
+def _plain_detail(detail: str) -> str | None:
+	"""Drop Desk links and HTML from an ERPNext validation message."""
+	import re
+
+	text = re.sub(r"<br\s*/?>", " ", detail or "", flags=re.IGNORECASE)
+	text = re.sub(r"<[^>]+>", "", text)
+	text = re.sub(r"https?://\S+", "", text)
+	text = re.sub(r"\s+", " ", text).strip()
+	if re.search(r"entered multiple times", text, re.IGNORECASE):
+		return "The same item is on more than one line. Check the item and the unit on each row."
+	return text[:400] or None
+
+
 def _tool_error(result) -> dict:
 	detail = getattr(result, "error", None) or ""
-	return {"ok": False, "error_key": "idp.readFailed", "detail": str(detail)[:400] or None}
+	return {"ok": False, "error_key": "idp.readFailed", "detail": _plain_detail(str(detail))}
 
 
 def _open_draft(doctype: str, name: str) -> dict | None:
@@ -582,6 +595,8 @@ def _run_create(planned: dict, file_url: str) -> dict:
 			file_sha256_hex=digest,
 			status=scan_mod.EXTRACTING,
 		)
+	except frappe.PermissionError:
+		return {"ok": False, "error_key": "idp.denied"}
 	except Exception:
 		frappe.log_error(title="TaxMate IDP persist scan failed", message=frappe.get_traceback())
 		return {"ok": False, "error_key": "idp.readFailed", "detail": "Could not create Scan"}
@@ -712,7 +727,7 @@ def _save_create(
 		instructions["header"],
 		instructions.get("items") or [],
 		_fills(fills),
-		_draft_defaults(instructions.get("items") or []),
+		_draft_defaults(instructions.get("items") or [], instructions.get("doctype") or ""),
 	)
 	instructions["header"] = header
 	instructions["items"] = items
@@ -754,7 +769,7 @@ def _save_create(
 		submitted = submit_doc({"doctype": instructions["doctype"], "name": name})
 	except Exception as exc:
 		payload["error_key"] = "idp.submitFailed"
-		payload["detail"] = str(exc)
+		payload["detail"] = _plain_detail(str(exc))
 		return payload
 	payload["step"] = "submitted"
 	payload["docstatus"] = submitted.get("docstatus") if isinstance(submitted, dict) else payload["docstatus"]
@@ -835,7 +850,7 @@ def _prefill_writes(review: dict) -> None:
 			row["value"] = defaults["vat_emirate"]
 
 
-def _draft_defaults(items: list) -> dict:
+def _draft_defaults(items: list, doctype: str = "") -> dict:
 	from taxmate.utils.company import can_use_company
 
 	company = get_default_company()
@@ -852,6 +867,7 @@ def _draft_defaults(items: list) -> dict:
 		code = row.get("item_code")
 		if code and code not in uoms:
 			uoms[code] = frappe.db.get_value("Item", code, "stock_uom") or ""
+	purchase = doctype.startswith("Purchase") or doctype == "Supplier Quotation"
 	return {
 		"company": company or "",
 		"cost_center": frappe.db.get_value("Company", company, "cost_center") if company else "",
@@ -859,7 +875,13 @@ def _draft_defaults(items: list) -> dict:
 		"income_account": frappe.db.get_value("Company", company, "default_income_account")
 		if company
 		else "",
+		"expense_account": (
+			frappe.db.get_value("Company", company, "default_expense_account") if company and purchase else ""
+		),
 		"selling_price_list": frappe.db.get_single_value("Selling Settings", "selling_price_list") or "",
+		"buying_price_list": (
+			frappe.db.get_single_value("Buying Settings", "buying_price_list") or "" if purchase else ""
+		),
 		"vat_emirate": _company_emirate(company or ""),
 		"item_uom": uoms,
 	}

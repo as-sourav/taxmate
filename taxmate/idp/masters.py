@@ -1,7 +1,7 @@
 """Consent-based related masters for Scan create.
 
 Unattended inventing stays off. The clerk confirms each proposal, then
-TaxMate inserts Supplier / Customer / Item (and Address) before the draft.
+TaxMate inserts UOM, Supplier, Customer, and Item (and Address) before the draft.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 from taxmate.uae.constants import UAE_EMIRATES
 
 # Links the scan may create after the clerk confirms. Everything else blocks.
-CREATABLE: frozenset[str] = frozenset({"Supplier", "Customer", "Item"})
+CREATABLE: frozenset[str] = frozenset({"UOM", "Supplier", "Customer", "Item"})
 EMIRATES: tuple[str, ...] = tuple(UAE_EMIRATES)
 
 _PARTY_LABEL: dict[str, str] = {
@@ -116,6 +116,9 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 		return
 	doctype = str(data.get("doctype") or "")
 	body = ocr_text.replace("\r", "")
+	if "\\n" in body and body.count("\n") < 2:
+		body = body.replace("\\n", "\n").replace("\\t", "\t")
+	_fill_printed_header(header, body, doctype)
 
 	if doctype.startswith("Purchase") or doctype == "Supplier Quotation":
 		if not str(header.get("supplier") or "").strip():
@@ -153,9 +156,9 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 						header["state"] = state
 						header["vat_emirate"] = state
 		if not str(header.get("phone") or "").strip():
-			m = re.search(r"(\+\d{8,15})", body)
+			m = re.search(r"(\+\d[\d\s-]{7,20}\d)", body)
 			if m:
-				header["phone"] = m.group(1)
+				header["phone"] = re.sub(r"[\s-]+", " ", m.group(1)).strip()
 
 	if doctype.startswith("Sales") or doctype in ("Quotation", "Delivery Note"):
 		if not str(header.get("customer") or "").strip():
@@ -165,6 +168,7 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 
 	items = data.get("items") if isinstance(data.get("items"), list) else []
 	supplier_hint = str(header.get("supplier") or header.get("account_name") or "").strip().lower()
+	parsed_lines = _parse_tax_invoice_lines(body)
 	bad = not items
 	for row in items:
 		if not isinstance(row, dict):
@@ -184,7 +188,10 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 		):
 			bad = True
 			break
-	if bad:
+	current_rows = [row for row in items if isinstance(row, dict)]
+	if parsed_lines and (bad or _rows_are_units(items) or len(parsed_lines) > len(current_rows)):
+		data["items"] = parsed_lines
+	elif bad:
 		desc = ""
 		for m in re.finditer(r"(?m)^(?P<line>.{20,180})$", body):
 			line = re.sub(r"\s+", " ", m.group("line")).strip()
@@ -234,6 +241,227 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 					"uom": "Nos",
 				}
 			]
+
+
+# Printed units that a column scan must not treat as the product.
+_UNIT_TOKENS: frozenset[str] = frozenset(
+	{
+		"btl",
+		"btls",
+		"bottle",
+		"bottles",
+		"cup",
+		"cups",
+		"pkt",
+		"pkts",
+		"packet",
+		"packets",
+		"tub",
+		"tubs",
+		"tray",
+		"trays",
+		"nos",
+		"pcs",
+		"pc",
+		"piece",
+		"pieces",
+		"kg",
+		"gm",
+		"gms",
+		"ltr",
+		"ml",
+		"box",
+		"boxes",
+		"ctn",
+		"carton",
+		"cartons",
+		"set",
+		"pair",
+		"dozen",
+		"unit",
+		"units",
+		"bag",
+		"bags",
+		"can",
+		"cans",
+		"roll",
+		"rolls",
+		"pack",
+		"packs",
+	}
+)
+
+_TAX_LINE = re.compile(
+	r"^\s*(?P<idx>\d{1,3})\s+"
+	r"(?P<code>[A-Z][A-Z0-9-]{2,})\s+"
+	r"(?P<body>.+?)\s+"
+	r"(?P<qty>\d+(?:\.\d+)?)\s+"
+	r"(?P<uom>[A-Za-z]{2,12})\s+"
+	r"(?P<rate>\d[\d,]*\.\d{2})\s+"
+	r"(?P<disc>-|—|\d[\d,]*\.\d{2})\s+"
+	r"(?P<taxable>\d[\d,]*\.\d{2})\s+"
+	r"(?P<vat>\d[\d,]*\.\d{2})\s+"
+	r"(?P<total>\d[\d,]*\.\d{2})\s*$"
+)
+
+
+def _unit_token(value: str) -> bool:
+	token = re.sub(r"[^A-Za-z]", "", value or "").lower()
+	return bool(token) and token in _UNIT_TOKENS
+
+
+def _rows_are_units(items: list[Any]) -> bool:
+	"""True when the extract parked the UOM column in the item name."""
+	labels: list[str] = []
+	for row in items:
+		if not isinstance(row, dict):
+			continue
+		label = str(row.get("item_name") or row.get("item_code") or "").strip()
+		if label:
+			labels.append(label)
+	if len(labels) < 2:
+		return False
+	hits = sum(1 for label in labels if _unit_token(label))
+	return hits >= max(2, (len(labels) + 1) // 2)
+
+
+def _money(token: str) -> float:
+	text = str(token or "").strip()
+	if text in {"", "-", "—"}:
+		return 0.0
+	return float(text.replace(",", ""))
+
+
+def _parse_tax_invoice_lines(body: str) -> list[dict[str, Any]]:
+	"""Read a # / code / description / qty / UOM / rate / discount / taxable / VAT / total table."""
+	rows: list[dict[str, Any]] = []
+	seen: set[str] = set()
+	for line in body.splitlines():
+		match = _TAX_LINE.match(line)
+		if not match:
+			continue
+		code = match.group("code").strip()
+		if code in seen or _unit_token(code):
+			continue
+		qty = _money(match.group("qty"))
+		rate = _money(match.group("rate"))
+		disc = _money(match.group("disc"))
+		taxable = _money(match.group("taxable"))
+		vat = _money(match.group("vat"))
+		total = _money(match.group("total"))
+		if qty <= 0 or rate < 0:
+			continue
+		net = round(qty * rate - disc, 2)
+		if abs(net - taxable) > 0.05 and abs(round(taxable + vat, 2) - total) > 0.05:
+			continue
+		name = re.sub(r"\s+", " ", match.group("body")).strip(" -")
+		uom = match.group("uom").strip()
+		row: dict[str, Any] = {
+			"item_code": code,
+			"item_name": name or code,
+			"description": name or code,
+			"qty": qty,
+			"quantity": qty,
+			"uom": uom,
+			"stock_uom": uom,
+			"rate": rate,
+			"unit_price": rate,
+			"amount": taxable,
+			"conversion_factor": 1,
+			"stock_qty": qty,
+			"base_rate": rate,
+			"base_amount": taxable,
+		}
+		if disc > 0:
+			row["discount_amount"] = disc
+		rows.append(row)
+		seen.add(code)
+	return rows if len(rows) >= 2 else []
+
+
+def _letterhead_name(body: str) -> str:
+	match = re.search(
+		r"(?m)^([A-Z][A-Za-z0-9&.,'()-]{2,}(?:\s+[A-Za-z0-9&.,'()-]+){0,8})\s{2,}TAX\s+INVOICE",
+		body,
+	)
+	if match:
+		return re.sub(r"\s+", " ", match.group(1)).strip(" -")
+	match = re.search(r"(?m)^([^\n]{4,80})\n[ \t]*TAX\s+INVOICE", body, re.IGNORECASE)
+	return match.group(1).strip() if match else ""
+
+
+def _bill_to_name(body: str) -> str:
+	match = re.search(r"Bill\s*To\s*:?\s*\n+\s*(.+)", body, re.IGNORECASE)
+	if not match:
+		return ""
+	return match.group(1).strip().split("\n")[0].strip()
+
+
+def _split_trns(body: str) -> tuple[str, str]:
+	parts = re.split(r"Bill\s*To", body, maxsplit=1, flags=re.IGNORECASE)
+
+	def first(chunk: str) -> str:
+		found = re.search(r"TRN\s*:?\s*(1\d{14})", chunk)
+		return found.group(1) if found else ""
+
+	if len(parts) == 2:
+		return first(parts[0]), first(parts[1])
+	found = re.findall(r"TRN\s*:?\s*(1\d{14})", body)
+	seller = found[0] if found else ""
+	buyer = found[1] if len(found) > 1 else ""
+	return seller, buyer
+
+
+def _fill_printed_header(header: dict[str, Any], body: str, doctype: str) -> None:
+	"""Put printed seller, dates, currency, and totals on the header the draft will use."""
+	# A VAT amount is not a Purchase Taxes and Charges Template link.
+	tax_link = str(header.get("taxes_and_charges") or "").strip().replace(" ", "")
+	if tax_link and re.fullmatch(r"[\d,.]+", tax_link):
+		header.pop("taxes_and_charges", None)
+	purchase = doctype.startswith("Purchase") or doctype == "Supplier Quotation"
+	seller_trn, buyer_trn = _split_trns(body)
+	if purchase:
+		current = str(header.get("supplier") or "").strip()
+		letter = _letterhead_name(body)
+		bill_to = _bill_to_name(body)
+		if letter and (
+			not current or _unit_token(current) or (bill_to and current.lower() == bill_to.lower())
+		):
+			header["supplier"] = letter
+		tax = re.sub(r"\s+", "", str(header.get("tax_id") or ""))
+		if seller_trn and (not tax or (buyer_trn and tax == buyer_trn)):
+			header["tax_id"] = seller_trn
+	if not str(header.get("currency") or "").strip() and re.search(r"\bAED\b|\(AED\)", body):
+		header["currency"] = "AED"
+	if not str(header.get("bill_no") or "").strip():
+		match = re.search(r"Invoice\s*No\.?\s*:?\s*([A-Z0-9][A-Z0-9-]*)", body, re.IGNORECASE)
+		if match:
+			header["bill_no"] = match.group(1)
+	if not str(header.get("posting_date") or "").strip():
+		match = re.search(r"Invoice\s*Date\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", body, re.IGNORECASE)
+		if match:
+			parsed = _parse_ocr_date(match.group(1))
+			if parsed:
+				header["posting_date"] = parsed
+	if not str(header.get("due_date") or "").strip():
+		match = re.search(r"Due\s*Date\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", body, re.IGNORECASE)
+		if match:
+			parsed = _parse_ocr_date(match.group(1))
+			if parsed:
+				header["due_date"] = parsed
+	if not str(header.get("net_total") or "").strip():
+		match = re.search(r"Total\s+Taxable\s+Amount\s+([\d,]+\.\d{2})", body, re.IGNORECASE)
+		if match:
+			header["net_total"] = _money(match.group(1))
+	if not str(header.get("grand_total") or "").strip():
+		match = re.search(r"Grand\s+Total\s*\(AED\)\s+([\d,]+\.\d{2})", body, re.IGNORECASE)
+		if match:
+			header["grand_total"] = _money(match.group(1))
+	if not _emirate(header):
+		head = body.split("Item Code", 1)[0]
+		found = [name for name in EMIRATES if re.search(rf"\b{re.escape(name)}\b", head, re.IGNORECASE)]
+		if len(found) == 1:
+			header["vat_emirate"] = found[0]
 
 
 def normalize_extract(extracted: dict[str, Any], *, promote_items: bool = True) -> None:
@@ -523,7 +751,9 @@ def build_proposals(extracted: dict[str, Any]) -> list[dict[str, Any]]:
 	seen: set[str] = set()
 	for row in creatable:
 		doctype = row["doctype"]
-		if doctype in ("Supplier", "Customer"):
+		if doctype == "UOM":
+			proposal = _uom_proposal(row)
+		elif doctype in ("Supplier", "Customer"):
 			proposal = _party_proposal(doctype, row, header)
 		elif doctype == "Item":
 			proposal = _item_proposal(row, items)
@@ -533,7 +763,25 @@ def build_proposals(extracted: dict[str, Any]) -> list[dict[str, Any]]:
 			continue
 		seen.add(proposal["key"])
 		proposals.append(proposal)
+	proposals.sort(key=lambda card: {"UOM": 0, "Supplier": 1, "Customer": 2, "Item": 3}.get(card["doctype"], 9))
 	return proposals
+
+
+def _uom_proposal(missing: dict[str, str]) -> dict[str, Any] | None:
+	name = str(missing.get("name") or "").strip()
+	if not name:
+		return None
+	return {
+		"key": f"uom:{name}",
+		"doctype": "UOM",
+		"link_field": str(missing.get("field") or "uom"),
+		"title": name,
+		"source_fields": {"uom_name": name},
+		"required_fields": [_field("uom_name", "idp.field.uom", name)],
+		"optional_fields": [],
+		"consent_label_key": "idp.field.uom",
+		"confirmed": False,
+	}
 
 
 def _party_address_line(doctype: str, header: dict[str, Any]) -> str:
@@ -626,7 +874,7 @@ def _item_proposal(missing: dict[str, str], items: list[dict[str, Any]]) -> dict
 		"required_fields": required,
 		"optional_fields": optional,
 		"consent_label_key": "idp.propose.item",
-		"confirmed": False,
+		"confirmed": True,
 	}
 
 
@@ -930,6 +1178,17 @@ def _parse_ocr_date(value: str) -> str:
 		return ""
 	if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
 		return text
+	# UAE tax invoices print the day first: 09/10/2026 is 9 October 2026.
+	slash = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", text)
+	if slash:
+		day = int(slash.group(1))
+		month = int(slash.group(2))
+		year = int(slash.group(3))
+		if year < 100:
+			year += 2000
+		if 1 <= day <= 31 and 1 <= month <= 12:
+			return f"{year:04d}-{month:02d}-{day:02d}"
+		return ""
 	# 18th August,2026 / 18 August 2026 / 18th Aug'26
 	m = re.search(
 		r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})'?[,\s]+(\d{2,4})",
@@ -1106,7 +1365,12 @@ def create_confirmed(
 		frappe.db.rollback(save_point=savepoint)
 		return {"ok": False, "error_key": error_key, "created": {}}
 
-	for row in proposals:
+	# Units first, then the party, then items that stock in those units.
+	ordered = sorted(
+		proposals,
+		key=lambda row: {"UOM": 0, "Supplier": 1, "Customer": 2, "Item": 3}.get(str(row.get("doctype") or ""), 9),
+	)
+	for row in ordered:
 		if not row.get("confirmed"):
 			return fail("idp.propose.needConsent")
 		doctype = str(row.get("doctype") or "")
@@ -1128,7 +1392,10 @@ def create_confirmed(
 				return fail("idp.propose.needFields")
 		values = _values_from_proposal(row)
 		try:
-			if doctype == "Supplier":
+			if doctype == "UOM":
+				name = _create_uom(values)
+				created[f"uom:{name}"] = name
+			elif doctype == "Supplier":
 				created["supplier"] = _create_supplier(values)
 			elif doctype == "Customer":
 				created["customer"] = _create_customer(values)
@@ -1239,6 +1506,19 @@ def _create_customer(values: dict[str, str]) -> str:
 	return doc.name
 
 
+def _create_uom(values: dict[str, str]) -> str:
+	import frappe
+
+	name = (values.get("uom_name") or values.get("uom") or "").strip()
+	if not name:
+		frappe.throw("Unit of measure is required")
+	if frappe.db.exists("UOM", name):
+		return name
+	doc = frappe.get_doc({"doctype": "UOM", "uom_name": name})
+	doc.insert()
+	return doc.name
+
+
 def _create_item(values: dict[str, str]) -> str:
 	import frappe
 
@@ -1253,9 +1533,9 @@ def _create_item(values: dict[str, str]) -> str:
 	group = values.get("item_group") or frappe.db.get_single_value("Stock Settings", "item_group")
 	if not group:
 		group = frappe.db.get_value("Item Group", {"is_group": 0}, "name") or "All Item Groups"
-	uom = values.get("stock_uom") or "Nos"
+	uom = (values.get("stock_uom") or "Nos").strip() or "Nos"
 	if not frappe.db.exists("UOM", uom):
-		uom = "Nos"
+		uom = _create_uom({"uom_name": uom})
 	doc = frappe.get_doc(
 		_stamp_custom_company(
 			{

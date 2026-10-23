@@ -71,8 +71,16 @@ export function useLang(): LangCtx {
 
 type Dict = Record<string, string>;
 
+/** Sales Invoice book. The section is Sales; the link still names the document. */
+const SALES_INVOICE_LABEL = { en: "Sales Invoices", ar: "فواتير المبيعات" };
+
 export function makeT(en: Dict, ar: Dict) {
-  return (key: string): string => (current === "ar" ? (ar[key] ?? en[key] ?? key) : (en[key] ?? key));
+  return (key: string): string => {
+    if (key === "nav.invoices" || key === "inv.title") {
+      return current === "ar" ? SALES_INVOICE_LABEL.ar : SALES_INVOICE_LABEL.en;
+    }
+    return current === "ar" ? (ar[key] ?? en[key] ?? key) : (en[key] ?? key);
+  };
 }
 
 /** Pick the localised field off a record, e.g. customer_name vs its Arabic twin. */

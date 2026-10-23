@@ -13,7 +13,7 @@ import frappe
 
 from taxmate.utils.company import get_default_company
 
-PIPELINE_VERSION = 2  # bump: OCR-once + preprocess CLAHE pipeline
+PIPELINE_VERSION = 3  # bump: column items and numeric tax amounts are not masters
 SCAN_DOCTYPE = "IDP Document Log"
 # Canonical machine (IDP brief); READY kept as alias for Review.
 REVIEW = "Review"

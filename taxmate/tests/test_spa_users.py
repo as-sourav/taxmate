@@ -181,6 +181,31 @@ class TestSpaUsers(FrappeTestCase):
 		self.assertIn("taxmate.api.users.update_profile", methods)
 		self.assertIn("taxmate.api.users.change_password", methods)
 
+	def test_accounts_manager_can_read_quotation(self):
+		# Callers: QuotationList via taxmate.api.resource.get_list.
+		# Schema: Custom DocPerm parent=Quotation, role, permlevel 0, if_owner 0.
+		row = frappe.db.get_value(
+			"Custom DocPerm",
+			{"parent": "Quotation", "role": "Accounts Manager", "permlevel": 0, "if_owner": 0},
+			["read", "select", "create", "submit", "cancel"],
+			as_dict=True,
+		)
+		self.assertIsNotNone(row)
+		self.assertEqual(cint(row.read), 1)
+		self.assertEqual(cint(row.select), 1)
+		self.assertEqual(cint(row.create), 1)
+		self.assertEqual(cint(row.submit), 1)
+		self.assertEqual(cint(row.cancel), 1)
+		clerk = frappe.db.get_value(
+			"Custom DocPerm",
+			{"parent": "Quotation", "role": "Accounts User", "permlevel": 0, "if_owner": 0},
+			["read", "create", "cancel"],
+			as_dict=True,
+		)
+		self.assertEqual(cint(clerk.read), 1)
+		self.assertEqual(cint(clerk.create), 1)
+		self.assertEqual(cint(clerk.cancel), 0)
+
 	def test_invite_then_set_role(self):
 		created = self._invite("clerk")
 		try:

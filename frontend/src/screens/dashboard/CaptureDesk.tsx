@@ -12,6 +12,7 @@ import { useFrappeGetCall } from "frappe-react-sdk";
 import { useIsMobileShell } from "../../components/MobileNav";
 import { METHOD, readableError } from "../../lib/frappe";
 import { t } from "../../i18n/strings";
+import { getLang } from "../../lib/i18n";
 import { apiFetch } from "../../mobile/http";
 import { isNative } from "../../mobile/platform";
 import {
@@ -906,6 +907,7 @@ function ReviewBlock({
         <section className="idp-card" aria-label={t("idp.propose.title")}>
           <header className="idp-card-head">
             <h3 className="idp-card-title">{t("idp.propose.title")}</h3>
+            <span className="idp-card-meta">{t("idp.propose.onSave")}</span>
           </header>
           <div className="idp-propose-stack">
             {proposals.map((row) => (
@@ -1004,7 +1006,7 @@ function ProposalCard({
           checked={proposal.confirmed}
           onChange={(event) => onChange({ ...proposal, confirmed: event.target.checked })}
         />
-        <span>{t(proposal.consent_label_key)}</span>
+        <span>{proposal.doctype === "UOM" ? unitConsent() : t(proposal.consent_label_key)}</span>
       </label>
       {proposal.confirmed ? (
         <div className="idp-fields">
@@ -1061,17 +1063,21 @@ function ProposalCard({
 }
 
 function cloneProposals(rows: Proposal[]): Proposal[] {
-  return rows.map((row) => ({
-    ...row,
-    confirmed: Boolean(row.confirmed),
-    required_fields: (row.required_fields || []).map((field) => {
+  return rows.map((row) => {
+    const required_fields = (row.required_fields || []).map((field) => {
       const blank = !String(field.value || "").trim();
       const typeDefault =
         blank && (field.field === "supplier_type" || field.field === "customer_type") ? "Company" : "";
       return { ...field, value: field.value || typeDefault };
-    }),
-    optional_fields: (row.optional_fields || []).map((field) => ({ ...field, value: field.value || "" })),
-  }));
+    });
+    const filled = required_fields.every((field) => String(field.value || "").trim().length > 0);
+    return {
+      ...row,
+      confirmed: Boolean(row.confirmed) || filled,
+      required_fields,
+      optional_fields: (row.optional_fields || []).map((field) => ({ ...field, value: field.value || "" })),
+    };
+  });
 }
 
 function proposalsReady(rows: Proposal[]): boolean {
@@ -1126,10 +1132,27 @@ function scanHasContent(review: Review, proposals: Proposal[]): boolean {
 }
 
 /** One user-facing line; never repeats the same sentence twice. */
+function unitConsent(): string {
+  return getLang() === "ar" ? "إنشاء وحدة القياس هذه؟" : "Create this unit?";
+}
+
+function plainDetail(detail: string): string {
+  const text = detail
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (/entered multiple times/i.test(text)) {
+    return "The same item is on more than one line. Check the item and the unit on each row.";
+  }
+  return text;
+}
+
 function formatScanError(review: Review): string {
   const head = review.error_key ? t(review.error_key) : "";
   const hint = review.detail_key ? t(review.detail_key) : "";
-  const detail = (review.detail || "").trim();
+  const detail = plainDetail((review.detail || "").trim());
   const parts: string[] = [];
   if (head) parts.push(head);
   for (const part of [hint, detail]) {
