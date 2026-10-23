@@ -286,6 +286,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
     const maxMs = 10 * 60 * 1000;
     while (!signal.aborted) {
       if (Date.now() - started > maxMs) {
+        await postForm(METHOD.idpCancelScan, { scan_id: id }).catch(() => undefined);
         return { ok: false, error_key: "idp.readSlow", can_save: false, scan_id: id };
       }
       const status = await postForm(
@@ -298,8 +299,15 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
       // Surface stages: upload, ocr, parties, items, review — map server status coarsely.
       if (st === "Extracting" || st === "Reading") setStageIdx(Math.min(1, Math.max(stages.length - 1, 0)));
       else if (st === "Ready" || st === "Review") setStageIdx(Math.max(stages.length - 1, 0));
-      if ((status.status === "Ready" || status.status === "Review") && status.review) {
-        return status.review as Review;
+      if (status.status === "Ready" || status.status === "Review") {
+        if (status.review) return status.review as Review;
+        return {
+          ok: false,
+          error_key: String(status.error_key || "idp.readFailed"),
+          detail: typeof status.detail === "string" ? status.detail : null,
+          can_save: false,
+          scan_id: id,
+        };
       }
       if (status.status === "Failed" || status.status === "Cancelled") {
         return {
