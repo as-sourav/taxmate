@@ -400,12 +400,27 @@ def get_scan(scan_id: str, target_doctype: str | None = None) -> dict:
 	payload = scan_payload(doc)
 	if doc.status in scan_mod.REVIEW_READY:
 		planned = _plan("create", target_doctype or doc.target_doctype, doc.file_url, None)
-		if planned.get("ok"):
-			review = _review_from_scan(scan_id, planned, doc.file_url)
-			payload["review"] = review
+		if not planned.get("ok"):
+			# A finished read with no review must not stay "still reading" on the client.
+			payload["ok"] = False
+			payload["error_key"] = planned.get("error_key") or "idp.readFailed"
+			detail = planned.get("detail") or planned.get("message")
+			if detail:
+				payload["detail"] = str(detail)[:400]
+		else:
+			try:
+				payload["review"] = _review_from_scan(scan_id, planned, doc.file_url)
+			except Exception:
+				frappe.log_error(title="TaxMate scan review build failed")
+				payload["ok"] = False
+				payload["error_key"] = "idp.readFailed"
+				payload["detail"] = "The file was read, but the draft could not be prepared. Start over."
 	elif doc.status == scan_mod.FAILED:
 		payload["ok"] = False
-		payload["error_key"] = doc.error_key or "idp.readFailed"
+		key = doc.error_key or "idp.readFailed"
+		if key == "worker_lost":
+			key = "idp.readFailed"
+		payload["error_key"] = key
 		# Surface worker exception text so the SPA can show more than the generic key.
 		detail = (getattr(doc, "error_message", None) or "").strip()
 		if detail:
