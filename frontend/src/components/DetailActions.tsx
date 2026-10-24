@@ -84,7 +84,7 @@ export default function DetailActions({
           {busy ? t("soc.saving") : t("inv.submit")}
         </button>
       )}
-      {draft && canWrite && onDelete && (
+      {draft && canWrite && canCancel && onDelete && (
         <button type="button" className="btn quiet" disabled={busy} onClick={onDelete}>
           {busy ? t("soc.saving") : t("inv.delete")}
         </button>
