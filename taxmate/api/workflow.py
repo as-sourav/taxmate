@@ -7,16 +7,31 @@ from frappe import _
 from frappe.client import cancel as client_cancel
 
 from taxmate.api.resource import _require_doc, assert_allowed_doctype, require_login
-from taxmate.setup.spa_roles import spa_role_of
+from taxmate.setup.spa_roles import STANDARD_ROLE_FOR_SPA, spa_role_of
+
+
+def _holds_standard_role(spa: str | None) -> bool:
+	"""Frontend role counts only when its standard Frappe role is on the user."""
+	if frappe.session.user == "Administrator":
+		return True
+	roles = set(frappe.get_roles())
+	if "System Manager" in roles:
+		return True
+	required = STANDARD_ROLE_FOR_SPA.get(spa or "")
+	if not required:
+		return False
+	return required in roles
 
 
 def _assert_can_submit() -> None:
-	if spa_role_of() == "viewer":
+	spa = spa_role_of()
+	if spa == "viewer" or not _holds_standard_role(spa):
 		frappe.throw(_("Viewers cannot submit"), frappe.PermissionError)
 
 
 def _assert_can_cancel() -> None:
-	if spa_role_of() not in ("owner", "accountant"):
+	spa = spa_role_of()
+	if spa not in ("owner", "accountant") or not _holds_standard_role(spa):
 		frappe.throw(_("Only an Owner or Accountant can cancel"), frappe.PermissionError)
 
 

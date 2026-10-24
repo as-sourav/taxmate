@@ -214,15 +214,16 @@ class TestSpaUsers(FrappeTestCase):
 			roles = frappe.get_roles(created["name"])
 			self.assertNotIn("System Manager", roles)
 			self.assertIn("TaxMate Accounts User", roles)
-			self.assertNotIn("Accounts User", roles)
+			self.assertIn("Accounts User", roles)
 			self.assertNotIn("Accounts Manager", roles)
 			user = frappe.get_doc("User", created["name"])
-			self.assertFalse(user.has_desk_access())
+			self.assertTrue(user.has_desk_access())
 			self.assertEqual(user.redirect_url, "/taxmate")
 			updated = set_user_role(user=created["name"], spa_role="accountant")
 			self.assertEqual(updated["spa_role"], "accountant")
 			self.assertEqual(spa_role_of(created["name"]), "accountant")
-			self.assertFalse(frappe.get_doc("User", created["name"]).has_desk_access())
+			self.assertIn("Accounts Manager", frappe.get_roles(created["name"]))
+			self.assertTrue(frappe.get_doc("User", created["name"]).has_desk_access())
 			disabled = set_user_enabled(user=created["name"], enabled=0)
 			self.assertEqual(disabled["enabled"], 0)
 			names = {row["name"] for row in list_users()}
@@ -333,6 +334,35 @@ class TestSpaUsers(FrappeTestCase):
 		finally:
 			frappe.set_user("Administrator")
 			self._delete(user.name)
+
+	def test_accounts_manager_role_deletes_a_draft_without_new_perms(self):
+		"""Draft delete comes from the standard Accounts Manager role.
+
+		Caller: taxmate.api.resource.delete via PurchaseInvoiceDetail.
+		User: use standard Frappe roles. Add the role to the user. Do not add
+		permissions onto a role that did not already have them.
+		"""
+		from taxmate.setup.spa_roles import _perm_values, apply_spa_roles
+
+		self.assertEqual(_perm_values("accountant", "Purchase Invoice")["delete"], 0)
+		self.assertEqual(_perm_values("owner", "Purchase Invoice")["delete"], 0)
+		self.assertEqual(_perm_values("clerk", "Purchase Invoice")["delete"], 0)
+		accountant = self._invite("accountant")
+		clerk = self._invite("clerk")
+		try:
+			self.assertIn("Accounts Manager", frappe.get_roles(accountant["name"]))
+			self.assertIn("Accounts User", frappe.get_roles(clerk["name"]))
+			self.assertNotIn("Accounts Manager", frappe.get_roles(clerk["name"]))
+			frappe.set_user(accountant["name"])
+			self.assertTrue(frappe.has_permission("Purchase Invoice", "delete"))
+			frappe.set_user(clerk["name"])
+			self.assertFalse(frappe.has_permission("Purchase Invoice", "delete"))
+			apply_spa_roles(accountant["name"], ["accountant"])
+			self.assertIn("Accounts Manager", frappe.get_roles(accountant["name"]))
+		finally:
+			frappe.set_user("Administrator")
+			self._delete(accountant["name"])
+			self._delete(clerk["name"])
 
 	def test_accountant_cannot_invite(self):
 		accountant = self._invite("accountant")

@@ -175,7 +175,7 @@ export default function PurchaseInvoiceDetail() {
         </p>
       </PageHead>
 
-      {busyError && <ErrorBox error={busyError} />}
+      {busyError && <ErrorBox error={busyError} heading={!deleteAction.error} />}
 
       <FormLayout aside={
         <>

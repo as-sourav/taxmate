@@ -1,8 +1,10 @@
-"""Four TaxMate SPA roles. Marker Role.role_name only — no ERPNext Desk roles.
+"""Four TaxMate SPA roles. Each one requires a standard Frappe role.
 
 spa_role is owner, accountant, clerk, or viewer. Marker Roles have desk_access=0.
+The frontend role is only active when the user also holds the standard role
+that already carries those permissions: Accounts Manager for owner and
+accountant, Accounts User for clerk. Viewer has no standard write role.
 Display names: Owner, Accountant, Accounts User (clerk), Auditor (viewer).
-The Frappe Administrator user keeps System Manager and Desk. SPA Admin is TaxMate Owner.
 """
 
 from __future__ import annotations
@@ -55,6 +57,15 @@ LEGACY_DESK_ROLES: frozenset[str] = frozenset(
 		"UAE Tax Manager",
 	}
 )
+
+# Frontend role → the standard Frappe role that already has those permissions.
+# Assign the role. Do not add permission bits the standard role does not have.
+STANDARD_ROLE_FOR_SPA: dict[str, str | None] = {
+	"owner": "Accounts Manager",
+	"accountant": "Accounts Manager",
+	"clerk": "Accounts User",
+	"viewer": None,
+}
 
 # Desk roles spa_roles_of already treats as TaxMate roles. Custom DocPerm
 # follows that map. ERPNext does not give Accounts Manager a Quotation row,
@@ -337,9 +348,23 @@ def apply_spa_roles(
 
 	doc = frappe.get_doc("User", user)
 	addon_set = frozenset(ADDON_ROLES)
+	required_standard = {
+		name
+		for spa in normalized
+		for name in (STANDARD_ROLE_FOR_SPA.get(spa),)
+		if name
+	}
 	keep = []
 	for row in doc.roles:
 		role = row.role
+		# Keep standard roles the user already has. Drop Accounts Manager or
+		# Accounts User only when this save no longer includes the frontend
+		# role that requires them. Other standard roles stay untouched.
+		if role in ("Accounts Manager", "Accounts User") and role not in required_standard:
+			continue
+		if role in LEGACY_DESK_ROLES or role == "Desk User":
+			keep.append(role)
+			continue
 		if role in MANAGED_ROLES or role == "System Manager" or role in addon_set:
 			continue
 		if _role_grants_desk(role):
@@ -355,7 +380,13 @@ def apply_spa_roles(
 				extras.append(role)
 
 	markers = [MARKER[spa] for spa in normalized]
-	wanted = tuple(dict.fromkeys([*keep, *markers, *extras]))
+	# The frontend role is incomplete without its standard Frappe role.
+	standard = [
+		role
+		for role in (STANDARD_ROLE_FOR_SPA.get(spa) for spa in normalized)
+		if role and role not in keep
+	]
+	wanted = tuple(dict.fromkeys([*keep, *markers, *standard, *extras]))
 	current = tuple(row.role for row in doc.roles)
 	needs_home = (doc.redirect_url or "") != "/taxmate" or getattr(doc, "default_app", None) != "taxmate"
 	if doc.meta.has_field("default_workspace") and doc.get("default_workspace"):
@@ -374,8 +405,10 @@ def apply_spa_roles(
 		doc.default_app = "taxmate"
 	if doc.meta.has_field("default_workspace"):
 		doc.default_workspace = None
-	# Recompute after role rewrite — Website User cannot open /desk by URL.
-	if not any(_role_grants_desk(row.role) for row in doc.roles):
+	# A standard desk role cannot sit on a Website User. Frappe rejects that save.
+	if any(_role_grants_desk(row.role) for row in doc.roles):
+		doc.user_type = "System User"
+	else:
 		doc.user_type = "Website User"
 	doc.save(ignore_permissions=True)
 	frappe.clear_cache(user=user)
@@ -423,6 +456,9 @@ def _perm_values(spa: str, doctype: str) -> dict[str, int]:
 		if submittable:
 			flags["submit"] = 1
 		return flags
+	# Marker roles stay inside the rights TaxMate defined for them. Draft delete
+	# already exists on the standard Accounts Manager role; give that role to the
+	# user instead of adding a permission this role did not have.
 	flags = {**read, "write": 1, "create": 1}
 	if submittable:
 		flags["submit"] = 1
@@ -768,8 +804,9 @@ def _lock_user_to_spa(user: str) -> None:
 		apply_spa_roles(user, spa, extra_roles=extras)
 
 	doc = frappe.get_doc("User", user)
-	if doc.has_desk_access():
+	if doc.has_desk_access() and not any(row.role in LEGACY_DESK_ROLES for row in doc.roles):
 		# Last resort: drop any remaining desk-granting roles.
+		# Standard roles such as Accounts Manager are kept above.
 		kept = [row.role for row in doc.roles if not _role_grants_desk(row.role)]
 		if not any(r in MARKER.values() for r in kept):
 			kept.append(MARKER[spa[0]])
