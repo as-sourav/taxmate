@@ -41,30 +41,52 @@ export function isAppProvider(session: {
   return false;
 }
 
+/** Standard Frappe role each frontend role requires. Viewer has none. */
+const STANDARD_ROLE: Record<Exclude<SpaRole, "viewer">, string> = {
+  owner: "Accounts Manager",
+  accountant: "Accounts Manager",
+  clerk: "Accounts User",
+};
+
+function holdsStandardRole(roles: string[], spa: SpaRole): boolean {
+  if (roles.includes("System Manager")) return true;
+  if (spa === "viewer") return true;
+  if (spa === "accountant" && roles.includes("UAE Tax Manager")) return true;
+  return roles.includes(STANDARD_ROLE[spa]);
+}
+
 export function spaRolesOf(session: {
   spa_role?: string | null;
   spa_roles?: string[];
   roles?: string[];
+  user?: string;
 } | undefined): SpaRole[] {
-  const listed = session?.spa_roles?.filter(
-    (r): r is SpaRole => r === "owner" || r === "accountant" || r === "clerk" || r === "viewer",
-  );
-  if (listed && listed.length) return listed;
-  if (isAppProvider(session)) return [];
-
   const roles = session?.roles ?? [];
+  if (session?.user === "Administrator") return [];
+  if (roles.includes("System Manager") && !roles.some((role) => role.startsWith("TaxMate"))) return [];
+
   const found: SpaRole[] = [];
-  if (roles.includes("TaxMate Owner")) found.push("owner");
-  if (roles.includes("TaxMate Accountant")) found.push("accountant");
-  if (roles.includes("TaxMate Accounts User") || roles.includes("TaxMate Accounts Officer") || roles.includes("TaxMate Clerk")) found.push("clerk");
+  if (roles.includes("TaxMate Owner") && holdsStandardRole(roles, "owner")) found.push("owner");
+  if (roles.includes("TaxMate Accountant") && holdsStandardRole(roles, "accountant")) found.push("accountant");
+  if (
+    (roles.includes("TaxMate Accounts User")
+      || roles.includes("TaxMate Accounts Officer")
+      || roles.includes("TaxMate Clerk"))
+    && holdsStandardRole(roles, "clerk")
+  ) found.push("clerk");
   if (roles.includes("TaxMate Auditor") || roles.includes("TaxMate Viewer")) found.push("viewer");
-  if (found.length) return found;
-  if (roles.includes("Accounts Manager") || roles.includes("UAE Tax Manager")) return ["accountant"];
-  if (roles.includes("Accounts User")) return ["clerk"];
-  const direct = session?.spa_role;
-  if (direct === "owner" || direct === "accountant" || direct === "clerk" || direct === "viewer") {
-    return [direct];
-  }
+  if (
+    !found.includes("accountant")
+    && !found.includes("owner")
+    && (roles.includes("Accounts Manager") || roles.includes("UAE Tax Manager"))
+  ) found.push("accountant");
+  if (
+    !found.includes("clerk")
+    && !found.includes("accountant")
+    && !found.includes("owner")
+    && roles.includes("Accounts User")
+  ) found.push("clerk");
+  if (found.length) return SPA_ROLES.filter((role) => found.includes(role));
   return ["viewer"];
 }
 
@@ -194,19 +216,21 @@ export function canOpenPosNext(session: {
 
 const SUBMIT_ROLES = ["Accounts User", "Accounts Manager", "UAE Tax Manager", "System Manager"];
 const CANCEL_ROLES = ["Accounts Manager", "UAE Tax Manager", "System Manager"];
+const DELETE_ROLES = ["Accounts Manager", "Sales Manager", "Purchase Manager", "System Manager"];
 
+/** Submit is shown only when a standard role that can submit is on the user. */
 export function canSubmitSales(roles: string[] | undefined): boolean {
-  const spa = spaRoleOf({ roles });
-  if (spa === "viewer") return false;
-  if (spa === "owner" || spa === "accountant" || spa === "clerk") return true;
   return (roles ?? []).some((r) => SUBMIT_ROLES.includes(r));
 }
 
+/** Cancel is shown only when a standard role that can cancel is on the user. */
 export function canCancelSales(roles: string[] | undefined): boolean {
-  const spa = spaRoleOf({ roles });
-  if (spa === "owner" || spa === "accountant") return true;
-  if (spa === "clerk" || spa === "viewer") return false;
   return (roles ?? []).some((r) => CANCEL_ROLES.includes(r));
+}
+
+/** Draft delete is shown only when a standard role that can delete is on the user. */
+export function canDeleteDraft(roles: string[] | undefined): boolean {
+  return (roles ?? []).some((r) => DELETE_ROLES.includes(r));
 }
 
 export function eInvoiceLocked(status?: string | null): boolean {
