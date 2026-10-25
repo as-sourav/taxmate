@@ -160,6 +160,33 @@ class TestGetScanFailedDetail(unittest.TestCase):
 		self.assertEqual(out.get("error_key"), "idp.readFailed")
 		self.assertIn("1064", out.get("detail") or "")
 
+	def test_ready_scan_without_a_plan_is_not_left_reading(self):
+		import taxmate.api.idp_desk as desk
+		from taxmate.idp import scan as scan_mod
+
+		doc = MagicMock()
+		doc.status = scan_mod.REVIEW
+		doc.error_key = None
+		doc.error_message = ""
+		doc.name = "IDPLOG-READY"
+		doc.file_url = "/private/files/x.pdf"
+		doc.target_doctype = "Purchase Invoice"
+
+		with (
+			patch.object(desk, "require_login"),
+			patch("taxmate.idp.scan.assert_scan_access", return_value=doc),
+			patch(
+				"taxmate.idp.scan.scan_payload",
+				return_value={"ok": True, "status": scan_mod.REVIEW, "scan_id": "IDPLOG-READY"},
+			),
+			patch.object(desk, "_plan", return_value={"ok": False, "error_key": "idp.denied"}),
+		):
+			out = desk.get_scan("IDPLOG-READY", "Purchase Invoice")
+
+		self.assertFalse(out.get("ok"))
+		self.assertEqual(out.get("error_key"), "idp.denied")
+		self.assertNotIn("review", out)
+
 
 if __name__ == "__main__":
 	unittest.main()

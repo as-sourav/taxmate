@@ -12,6 +12,7 @@ import { useFrappeGetCall } from "frappe-react-sdk";
 import { useIsMobileShell } from "../../components/MobileNav";
 import { METHOD, readableError } from "../../lib/frappe";
 import { t } from "../../i18n/strings";
+import { getLang } from "../../lib/i18n";
 import { apiFetch } from "../../mobile/http";
 import { isNative } from "../../mobile/platform";
 import {
@@ -285,6 +286,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
     const maxMs = 10 * 60 * 1000;
     while (!signal.aborted) {
       if (Date.now() - started > maxMs) {
+        await postForm(METHOD.idpCancelScan, { scan_id: id }).catch(() => undefined);
         return { ok: false, error_key: "idp.readSlow", can_save: false, scan_id: id };
       }
       const status = await postForm(
@@ -297,8 +299,15 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
       // Surface stages: upload, ocr, parties, items, review — map server status coarsely.
       if (st === "Extracting" || st === "Reading") setStageIdx(Math.min(1, Math.max(stages.length - 1, 0)));
       else if (st === "Ready" || st === "Review") setStageIdx(Math.max(stages.length - 1, 0));
-      if ((status.status === "Ready" || status.status === "Review") && status.review) {
-        return status.review as Review;
+      if (status.status === "Ready" || status.status === "Review") {
+        if (status.review) return status.review as Review;
+        return {
+          ok: false,
+          error_key: String(status.error_key || "idp.readFailed"),
+          detail: typeof status.detail === "string" ? status.detail : null,
+          can_save: false,
+          scan_id: id,
+        };
       }
       if (status.status === "Failed" || status.status === "Cancelled") {
         return {
@@ -447,11 +456,12 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         return;
       }
       // Keep the review cards; only stamp the save failure so the foot can show it.
+      // Caller: Save draft button. The file is already read; do not call that a read failure.
       setReview((prev) => ({
         ...(prev || {}),
         ...result,
         ok: false,
-        error_key: result.error_key || "idp.readFailed",
+        error_key: result.error_key || "idp.propose.failed",
         detail: result.detail,
         lines: result.lines ?? prev?.lines,
         items: result.items ?? prev?.items,
@@ -461,6 +471,9 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         can_submit: prev?.can_submit,
         save_key: prev?.save_key,
       }));
+      requestAnimationFrame(() => {
+        document.getElementById("idp-save-error")?.focus();
+      });
     } catch (err) {
       if (ac.signal.aborted) return;
       setReview((prev) => ({
@@ -754,7 +767,7 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
         {showReviewFoot && review ? (
           <div className="idp-foot">
             {review.error_key && !review.ok && scanHasContent(review, proposals) ? (
-              <p className="idp-err" role="alert">
+              <p id="idp-save-error" className="idp-err" role="alert" tabIndex={-1}>
                 {formatScanError(review)}
               </p>
             ) : null}
@@ -906,6 +919,7 @@ function ReviewBlock({
         <section className="idp-card" aria-label={t("idp.propose.title")}>
           <header className="idp-card-head">
             <h3 className="idp-card-title">{t("idp.propose.title")}</h3>
+            <span className="idp-card-meta">{t("idp.propose.onSave")}</span>
           </header>
           <div className="idp-propose-stack">
             {proposals.map((row) => (
@@ -1004,7 +1018,7 @@ function ProposalCard({
           checked={proposal.confirmed}
           onChange={(event) => onChange({ ...proposal, confirmed: event.target.checked })}
         />
-        <span>{t(proposal.consent_label_key)}</span>
+        <span>{proposal.doctype === "UOM" ? unitConsent() : t(proposal.consent_label_key)}</span>
       </label>
       {proposal.confirmed ? (
         <div className="idp-fields">
@@ -1061,17 +1075,21 @@ function ProposalCard({
 }
 
 function cloneProposals(rows: Proposal[]): Proposal[] {
-  return rows.map((row) => ({
-    ...row,
-    confirmed: Boolean(row.confirmed),
-    required_fields: (row.required_fields || []).map((field) => {
+  return rows.map((row) => {
+    const required_fields = (row.required_fields || []).map((field) => {
       const blank = !String(field.value || "").trim();
       const typeDefault =
         blank && (field.field === "supplier_type" || field.field === "customer_type") ? "Company" : "";
       return { ...field, value: field.value || typeDefault };
-    }),
-    optional_fields: (row.optional_fields || []).map((field) => ({ ...field, value: field.value || "" })),
-  }));
+    });
+    const filled = required_fields.every((field) => String(field.value || "").trim().length > 0);
+    return {
+      ...row,
+      confirmed: Boolean(row.confirmed) || filled,
+      required_fields,
+      optional_fields: (row.optional_fields || []).map((field) => ({ ...field, value: field.value || "" })),
+    };
+  });
 }
 
 function proposalsReady(rows: Proposal[]): boolean {
@@ -1126,10 +1144,32 @@ function scanHasContent(review: Review, proposals: Proposal[]): boolean {
 }
 
 /** One user-facing line; never repeats the same sentence twice. */
+function unitConsent(): string {
+  return getLang() === "ar" ? "إنشاء وحدة القياس هذه؟" : "Create this unit?";
+}
+
+function plainDetail(detail: string): string {
+  const text = detail
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (/entered multiple times/i.test(text)) {
+    return "The same item is on more than one line. Check the item and the unit on each row.";
+  }
+  return text;
+}
+
 function formatScanError(review: Review): string {
+  const detail = plainDetail((review.detail || "").trim());
+  // The file was read. Saying it could not be read hides the real save failure.
+  if (detail && /this draft was not saved/i.test(detail)) return detail;
+  if (detail && review.error_key === "idp.readFailed" && /permission denied/i.test(detail)) {
+    return "This draft was not saved. A supplier, customer, or item on it belongs to another company. Save the draft again.";
+  }
   const head = review.error_key ? t(review.error_key) : "";
   const hint = review.detail_key ? t(review.detail_key) : "";
-  const detail = (review.detail || "").trim();
   const parts: string[] = [];
   if (head) parts.push(head);
   for (const part of [hint, detail]) {

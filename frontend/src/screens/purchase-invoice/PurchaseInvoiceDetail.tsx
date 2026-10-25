@@ -4,7 +4,7 @@ import { useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk";
 import { DT, METHOD } from "../../lib/frappe";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
-import { canCancelSales, canSubmitSales } from "../../lib/roles";
+import { canCancelSales, canSubmitSales, canWrite, eInvoiceLocked } from "../../lib/roles";
 import { date, money, qty } from "../../lib/format";
 import { t } from "../../i18n/strings";
 import { TxnTotals } from "../../components/txnFields";
@@ -31,7 +31,7 @@ type Doc = {
   discount_amount?: number; additional_discount_percentage?: number; apply_discount_on?: string;
   outstanding_amount?: number; currency?: string; total_advance?: number;
   allocate_advances_automatically?: number; advances?: unknown[];
-  docstatus?: 0 | 1 | 2; status?: string;
+  docstatus?: 0 | 1 | 2; status?: string; uae_e_invoice_status?: string;
   items?: Line[];
 };
 
@@ -98,8 +98,8 @@ export default function PurchaseInvoiceDetail() {
   const outstanding = data.outstanding_amount ?? 0;
   const paid = Math.max(grand - outstanding, 0);
   const canSubmit = canSubmitSales(session.roles);
-  const canCancel = canCancelSales(session.roles);
-  const busyError = submitCall.error || cancelCall.error || deleteAction.error || payments.error;
+  const canCancel = canCancelSales(session.roles) && !eInvoiceLocked(data.uae_e_invoice_status);
+  const busyError = submitCall.error || cancelCall.error || amendCall.error || deleteAction.error || payments.error;
 
   const allocations = Object.values(
     (payments.data?.message ?? [])
@@ -131,7 +131,7 @@ export default function PurchaseInvoiceDetail() {
             cancelled={data.docstatus === 2}
             canSubmit={canSubmit}
             canCancel={canCancel}
-            canWrite={true}
+            canWrite={canWrite(session)}
             busy={submitCall.loading || cancelCall.loading || amendCall.loading || deleteAction.loading}
             onEdit={() => nav(`/purchase-invoices/${encodeURIComponent(name)}/edit`)}
             onSubmit={() => void submitCall.call({ doc: { doctype: DT.purchaseInvoice, name } }).then(refresh)}
@@ -175,7 +175,7 @@ export default function PurchaseInvoiceDetail() {
         </p>
       </PageHead>
 
-      {busyError && <ErrorBox error={busyError} />}
+      {busyError && <ErrorBox error={busyError} heading={!deleteAction.error} />}
 
       <FormLayout aside={
         <>

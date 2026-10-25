@@ -43,9 +43,7 @@ def _remind_sla_breaches() -> None:
 		_raise_todo_once(
 			"UAE E-Invoice Log",
 			log.name,
-			_("E-invoice {0} for {1} is past the {2}-day transmission SLA (due {3}).").format(
-				log.reference_name, log.company, days, log.sla_due
-			),
+			e_invoice_sla_reminder_text(log.reference_name, log.company, days, log.sla_due),
 		)
 
 
@@ -63,9 +61,7 @@ def _remind_contingency() -> None:
 		_raise_todo_once(
 			"UAE E-Invoice Contingency",
 			row.name,
-			_("E-invoice downtime for {0} must be reported to the FTA (due {1}).").format(
-				row.company, row.report_due
-			),
+			e_invoice_contingency_reminder_text(row.company, row.report_due),
 		)
 
 
@@ -98,9 +94,32 @@ def _remind_mandate_deadlines() -> None:
 		)
 
 
+def company_einvoice_reminder_text(company: str) -> str | None:
+	try:
+		status = mandate_status(company)
+	except Exception:
+		return None
+	payload = mandate_reminder_payload(status, EINVOICE_MANDATE_REMINDER_WINDOW_DAYS)
+	if not payload:
+		return None
+	return _mandate_todo_message(payload)
+
+
+def e_invoice_sla_reminder_text(reference_name, company, days, sla_due) -> str:
+	return _("E-invoice {0} for {1} is past the {2}-day transmission SLA (due {3}).").format(
+		reference_name, company, days, sla_due
+	)
+
+
+def e_invoice_contingency_reminder_text(company, report_due) -> str:
+	return _("E-invoice downtime for {0} must be reported to the FTA (due {1}).").format(
+		company, report_due
+	)
+
+
 def _mandate_todo_message(payload: dict) -> str:
 	company = payload.get("company") or ""
-	disclaimer = payload.get("disclaimer") or ""
+	disclaimer = _(payload.get("disclaimer") or "")
 	if payload.get("kind") == "classify":
 		message = _(
 			"{0} has no e-invoicing cohort yet. Enter last accounting-period "
@@ -110,7 +129,7 @@ def _mandate_todo_message(payload: dict) -> str:
 		return f"{message}\n\n{disclaimer}"
 
 	parts = []
-	cohort = payload.get("cohort")
+	cohort = _(payload.get("cohort") or "")
 	for reason in payload.get("reasons") or []:
 		if reason == "asp_passed":
 			parts.append(

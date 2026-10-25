@@ -21,7 +21,7 @@ from taxmate.idp.validators_uae import (
 
 class TestTrn(unittest.TestCase):
 	def test_ok(self):
-		self.assertTrue(validate_trn("100123456789012")[0])
+		self.assertTrue(validate_trn("100123456780003")[0])
 
 	def test_bad_prefix(self):
 		ok, flag = validate_trn("200123456789012")

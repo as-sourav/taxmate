@@ -356,7 +356,7 @@
    13px search — under the 44px touch floor on exactly the widths a small
    tablet reports. Moving one breakpoint means moving the other. */
 @media (max-width: 900px) {
-  /* Row 1: the mark, then Scan / language / theme / avatar.
+  /* Row 1: the mark, then Scan / notifications / avatar.
      Row 2: the search box, which needs the full width to be usable. */
   /* Opaque band from the physical top (incl. status bar) so list cards
      cannot scroll through the sticky chrome. */
@@ -390,13 +390,6 @@
     border-radius: 11px;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
-  }
-  .app.has-mnav .topbar .langbtn {
-    min-height: 44px;
-    padding-inline: 10px;
-    border-radius: 11px;
-    font-size: 12px;
-    font-weight: 600;
   }
   .app.has-mnav .tools { gap: 4px; }
   .app.has-mnav .tright { gap: 4px; }

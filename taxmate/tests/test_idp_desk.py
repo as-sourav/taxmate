@@ -146,7 +146,7 @@ class TestIdpDeskSurface(unittest.TestCase):
 		review = review_from_extract(extracted, route="/invoices")
 		self.assertTrue(review["can_save"])
 		self.assertEqual(review["lines"], [{"label_key": "f.customer", "value": "Acme"}])
-		self.assertEqual(review["items"], [{"label": "Desk"}])
+		self.assertEqual(review["items"], [{"label": "ITEM-1 — Desk"}])
 		instructions = draft_instructions(extracted)
 		self.assertFalse(instructions["submit"])
 		self.assertTrue(instructions["user_confirmed"])
@@ -823,3 +823,131 @@ class TestIdpDeskSurface(unittest.TestCase):
 		self.assertEqual(
 			matches, [{"name": "ACC-SINV-0001", "label": "ACC-SINV-0001", "route": "/invoices/ACC-SINV-0001"}]
 		)
+
+
+GULF_DAIRY = """
+Gulf Dairy Products Trading LLC  TAX INVOICE
+Plot 7, Dubai Investments Park 2, Dubai, UAE
+Invoice No: GDP-INV-55190
+Tel: +971 4 885 3302
+Invoice Date: 09/10/2026
+TRN: 100938471500003
+Due Date: 08/11/2026
+
+Bill To
+Al Madina Hypermarket LLC
+Al Qusais Industrial Area 2, Dubai, UAE
+TRN: 100398765400003
+
+1 DY-MILK-1L Full Cream Milk 1 L 400 Btl 5.75 115.00 2,185.00 109.25 2,294.25
+2 DY-MILK-2L Full Cream Milk 2 L 200 Btl 10.50 105.00 1,995.00 99.75 2,094.75
+3 DY-LBN-1L Laban Fresh 1 L 250 Btl 4.25 - 1,062.50 53.12 1,115.62
+4 DY-YOG-500 Plain Yoghurt 500 g 300 Cup 4.75 71.25 1,353.75 67.69 1,421.44
+5 DY-LBNH-400 Labneh 400 g 120 Tub 9.50 - 1,140.00 57.00 1,197.00
+6 DY-CHZ-SL Cheddar Cheese Slices 200 g 150 Pkt 8.25 - 1,237.50 61.88 1,299.38
+7 DY-BTR-200 Salted Butter 200 g 100 Pkt 11.00 55.00 1,045.00 52.25 1,097.25
+8 DY-CRM-250 Cooking Cream 250 ml 180 Pkt 6.50 - 1,170.00 58.50 1,228.50
+9 DY-JCE-OR1 Orange Juice Fresh 1 L 160 Btl 8.75 - 1,400.00 70.00 1,470.00
+10 DY-JCE-MG1 Mango Juice 1 L 120 Btl 7.50 - 900.00 45.00 945.00
+11 DY-ICE-2L Vanilla Ice Cream 2 L 60 Tub 19.00 57.00 1,083.00 54.15 1,137.15
+12 DY-EGG-30 Fresh Eggs Tray of 30 200 Tray 16.50 - 3,300.00 165.00 3,465.00
+
+Total Taxable Amount 17,871.75
+VAT @ 5% 893.59
+Grand Total (AED) 18,765.34
+"""
+
+
+class TestGulfDairyPurchaseScan(unittest.TestCase):
+	def test_units_are_not_items_and_seller_trn_is_kept(self):
+		from taxmate.idp.masters import build_proposals, salvage_from_ocr_text
+
+		extracted = {
+			"success": True,
+			"ocr_text": GULF_DAIRY,
+			"extracted_data": {
+				"doctype": "Purchase Invoice",
+				"header": {
+					"bill_no": "GDP-INV-55190",
+					"net_total": 17871.75,
+					"grand_total": 18765.34,
+					"tax_id": "100398765400003",
+					"vat_emirate": "Dubai",
+				},
+				"items": [
+					{"item_name": "Btl"},
+					{"item_name": "Btl"},
+					{"item_name": "Cup"},
+					{"item_name": "Pkt"},
+					{"item_name": "Tub"},
+				],
+			},
+			"validation": {
+				"missing_masters": [
+					{"doctype": "UOM", "name": "Btl", "field": "uom"},
+					{"doctype": "UOM", "name": "Cup", "field": "uom"},
+					{"doctype": "UOM", "name": "Pkt", "field": "uom"},
+					{"doctype": "UOM", "name": "Tub", "field": "uom"},
+					{"doctype": "UOM", "name": "Tray", "field": "uom"},
+					{"doctype": "Item", "name": "DY-MILK-1L", "field": "item_code"},
+				]
+			},
+		}
+		salvage_from_ocr_text(extracted, GULF_DAIRY)
+		header = extracted["extracted_data"]["header"]
+		items = extracted["extracted_data"]["items"]
+		self.assertEqual(header["supplier"], "Gulf Dairy Products Trading LLC")
+		self.assertEqual(header["tax_id"], "100938471500003")
+		self.assertEqual(header["currency"], "AED")
+		self.assertEqual(header["posting_date"], "2026-10-09")
+		self.assertEqual(header["due_date"], "2026-11-08")
+		self.assertEqual(len(items), 12)
+		self.assertEqual(items[0]["item_code"], "DY-MILK-1L")
+		self.assertEqual(items[0]["item_name"], "Full Cream Milk 1 L")
+		self.assertEqual(items[0]["uom"], "Btl")
+		self.assertEqual(items[0]["qty"], 400)
+		self.assertEqual(items[0]["discount_amount"], 115)
+		self.assertEqual(items[0]["amount"], 2185)
+		self.assertEqual(items[2]["uom"], "Btl")
+		self.assertNotIn("discount_amount", items[2])
+		self.assertEqual(items[11]["item_code"], "DY-EGG-30")
+		self.assertEqual(items[11]["uom"], "Tray")
+		self.assertEqual(items[11]["item_name"], "Fresh Eggs Tray of 30")
+		cards = build_proposals(extracted)
+		self.assertEqual([card["doctype"] for card in cards[:5]], ["UOM", "UOM", "UOM", "UOM", "UOM"])
+		self.assertEqual(cards[-1]["doctype"], "Item")
+		units = {card["title"] for card in cards if card["doctype"] == "UOM"}
+		self.assertEqual(units, {"Btl", "Cup", "Pkt", "Tub", "Tray"})
+
+	def test_one_mashed_line_is_replaced_and_vat_is_not_a_template(self):
+		from taxmate.idp.masters import salvage_from_ocr_text
+
+		extracted = {
+			"success": True,
+			"extracted_data": {
+				"doctype": "Purchase Invoice",
+				"header": {
+					"supplier": "Gulf Dairy Products Trading LLC",
+					"taxes_and_charges": "893.59",
+					"net_total": 17871.75,
+					"grand_total": 18765.34,
+				},
+				"items": [
+					{
+						"item_name": "DY-JCE-MG1 Mango Juice 1 L 120 Btl 7.50",
+						"item_code": "DY-JCE-MG1-MANGO-JUI",
+						"qty": 900,
+						"uom": "Nos",
+					}
+				],
+			},
+		}
+		salvage_from_ocr_text(extracted, GULF_DAIRY)
+		header = extracted["extracted_data"]["header"]
+		items = extracted["extracted_data"]["items"]
+		self.assertNotIn("taxes_and_charges", header)
+		self.assertEqual(len(items), 12)
+		self.assertEqual(items[9]["item_code"], "DY-JCE-MG1")
+		self.assertEqual(items[9]["item_name"], "Mango Juice 1 L")
+		self.assertEqual(items[9]["uom"], "Btl")
+		self.assertEqual(items[9]["qty"], 120)

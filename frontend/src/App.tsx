@@ -172,6 +172,7 @@ import PosProfileList from "./screens/pos-profile/PosProfileList";
 import PosProfileDetail from "./screens/pos-profile/PosProfileDetail";
 import PosInvoiceList from "./screens/pos-invoice/PosInvoiceList";
 import PosInvoiceForm from "./screens/pos-invoice/PosInvoiceForm";
+import PosInvoiceDetail from "./screens/pos-invoice/PosInvoiceDetail";
 import PosReturnForm from "./screens/pos-invoice/PosReturnForm";
 // Phase 20 — Loyalty
 import LoyaltyProgramList from "./screens/loyalty-program/LoyaltyProgramList";
@@ -454,6 +455,7 @@ export default function App() {
           <Route path="/pos-invoices/new" element={<PosInvoiceForm />} />
           <Route path="/pos-invoices/:name/edit" element={<PosInvoiceForm />} />
           <Route path="/pos-invoices/:name/return" element={<PosReturnForm />} />
+          <Route path="/pos-invoices/:name" element={<PosInvoiceDetail />} />
           {/* Phase 20: Loyalty */}
           <Route path="/loyalty-programs" element={<LoyaltyProgramList />} />
           <Route path="/loyalty-programs/new" element={<LoyaltyProgramForm />} />

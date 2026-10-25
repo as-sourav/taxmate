@@ -12,7 +12,8 @@ import { printDocUrl } from "../../lib/printDoc";
 import { useDeleteDraftAction } from "../../lib/useDraftDelete";
 import { useDoc, useInsert } from "../../lib/resource";
 import { useSession } from "../../lib/session";
-import { canWrite } from "../../lib/roles";
+import { canCancelSales, canSubmitSales, canWrite } from "../../lib/roles";
+import { confirmCancel } from "../../lib/workflow";
 import { date, money } from "../../lib/format";
 import { t } from "../../i18n/strings";
 import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow, SumRow } from "../../components/ui";
@@ -40,10 +41,13 @@ export default function SupplierQuotationDetail() {
   const nav = useNavigate();
   const session = useSession();
   const writable = canWrite(session);
+  const canSubmit = canSubmitSales(session.roles);
+  const canCancel = canCancelSales(session.roles);
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.supplierQuotation, name);
   const makePo = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeSupplierQuotationPO);
   const submitCall = useFrappePostCall(METHOD.submit);
   const cancelCall = useFrappePostCall(METHOD.cancel);
+  const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
   const create = useInsert();
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<unknown>(null);
@@ -71,9 +75,21 @@ export default function SupplierQuotationDetail() {
   }
 
   async function doCancel() {
+    if (!confirmCancel(name)) return;
     setBusy(true); setActionError(null);
     try { await cancelCall.call({ doctype: DT.supplierQuotation, name }); mutate(); }
     catch (err) { setActionError(err); }
+    finally { setBusy(false); }
+  }
+
+  async function doAmend() {
+    setBusy(true); setActionError(null);
+    try {
+      const res = await amendCall.call({ doctype: DT.supplierQuotation, name });
+      const next = res?.message?.name;
+      if (next) nav(`/supplier-quotations/${encodeURIComponent(next)}`);
+      else mutate();
+    } catch (err) { setActionError(err); }
     finally { setBusy(false); }
   }
 
@@ -100,18 +116,27 @@ export default function SupplierQuotationDetail() {
         {writable && data.docstatus === 0 && (
           <>
             <button className="btn ghost" onClick={() => nav(`/supplier-quotations/${encodeURIComponent(name)}/edit`)}>{t("edit")}</button>
+            {canSubmit && (
             <button className="btn" onClick={() => void doSubmit()} disabled={busy}>{t("sq.submit")}</button>
+            )}
             <button type="button" className="btn quiet" disabled={deleteAction.loading || busy}
               onClick={deleteAction.onDelete}>
               {deleteAction.loading ? t("soc.saving") : t("inv.delete")}
             </button>
           </>
         )}
-        {writable && data.docstatus === 1 && (
+        {data.docstatus === 1 && (
           <>
+            {writable && (
             <button className="btn" onClick={() => void createPO()} disabled={busy}>{t("sq.makePO")}</button>
+            )}
+            {canCancel && (
             <button className="btn ghost" onClick={() => void doCancel()} disabled={busy}>{t("sq.cancel")}</button>
+            )}
           </>
+        )}
+        {canSubmit && data.docstatus === 2 && (
+          <button className="btn ghost" onClick={() => void doAmend()} disabled={busy}>{t("inv.amend")}</button>
         )}
       </PageHead>
       {actionError ? <ErrorBox error={actionError} /> : null}

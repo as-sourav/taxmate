@@ -27,6 +27,10 @@ svg{display:block}
   padding:0; display:flex; flex-direction:column;
   position:sticky; top:env(safe-area-inset-top, 0px); height:100dvh;
   overflow:hidden; flex:none;
+  /* Sticky plus overflow paints the collapsed flyout inside the rail's layer,
+     so the dashboard cards (later in the tree) covered it. Sit above the
+     topbar (20) and below dialogs (80+). */
+  z-index:30;
 }
 .rbrand{padding:14px 12px 10px; flex:none}
 .rail-body{flex:1; overflow-y:auto; overflow-x:hidden; padding:0 12px 14px; display:flex; flex-direction:column; gap:2px; min-height:0}
@@ -49,22 +53,47 @@ svg{display:block}
 .rlink.on{background:var(--brand-soft); color:var(--brand); font-weight:600}
 /* Lucide icon wrapper: flex-center so SVGs sit precisely */
 .rlink .ic{width:18px; height:18px; flex:none; display:flex; align-items:center; justify-content:center; color:inherit}
-.app.collapsed .rlink{justify-content:center; padding-inline:0}
-.app.collapsed .rlink span:not(.ic){display:none}
-.app.collapsed .rlink:hover::after{
+.app.collapsed .rail-body > .rlink{
+  justify-content:center; width:44px; height:44px; margin-inline:auto; padding:0; border-radius:10px;
+}
+.app.collapsed .rail-body > .rlink span:not(.ic){display:none}
+.app.collapsed .rail-body > .rlink:hover::after{
   content:attr(data-tip); position:absolute; inset-inline-start:calc(100% + 10px); top:50%; transform:translateY(-50%);
   background:var(--text); color:var(--surface); font-size:12px; font-weight:500; padding:5px 10px; border-radius:6px;
   white-space:nowrap; z-index:40; pointer-events:none; box-shadow:0 4px 12px rgba(0,0,0,.18);
 }
-[dir="rtl"] .app.collapsed .rlink:hover::after{inset-inline-start:auto; inset-inline-end:calc(100% + 10px)}
+[dir="rtl"] .app.collapsed .rail-body > .rlink:hover::after{inset-inline-start:auto; inset-inline-end:calc(100% + 10px)}
+.app.collapsed .rfly .rlink{justify-content:flex-start; width:auto; height:auto; margin:0; padding:8px 10px}
 /* Importers: AppShell grouped rail. Schema: button.rsec + .rgroup.
-   User: "Can we group the sidebar rather than showing all options" */
-.rsec{font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); padding:16px 11px 6px; white-space:nowrap; display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; background:transparent; border:0; cursor:pointer; text-align:start}
-.rsec .chev{width:12px; height:12px; flex:none; opacity:.45; transition:transform .15s}
+   Closed groups use the same slate as links so they stay readable. */
+.rsec{
+  font-size:13px; font-weight:600; letter-spacing:0; text-transform:none; color:var(--muted);
+  padding:8px 10px; margin-block-start:6px; border-radius:8px; white-space:nowrap;
+  display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%;
+  background:transparent; border:0; cursor:pointer; text-align:start;
+  transition:background 150ms ease, color 150ms ease;
+}
+.rsec:hover{background:var(--hover); color:var(--text)}
+.rsec[aria-expanded="true"]{color:var(--text)}
+.rsec .chev{width:14px; height:14px; flex:none; color:var(--muted); transition:transform .15s}
+.rsec:hover .chev,.rsec[aria-expanded="true"] .chev{color:var(--text)}
 .rsec[aria-expanded="true"] .chev{transform:rotate(90deg)}
 [dir="rtl"] .rsec[aria-expanded="true"] .chev{transform:rotate(-90deg)}
 .rgroup{display:flex; flex-direction:column; gap:2px}
-.app.collapsed .rsec{display:none}
+.app.collapsed .rgroup:first-of-type{margin-top:8px; padding-top:8px; border-top:1px solid var(--border)}
+.app.collapsed .rsec.ricon{
+  justify-content:center; width:44px; height:44px; margin-inline:auto; margin-block-start:4px; padding:0; border-radius:10px;
+}
+.app.collapsed .rsec.ricon .ic{width:18px; height:18px; display:flex; align-items:center; justify-content:center}
+.app.collapsed .rsec.ricon.on,
+.app.collapsed .rsec.ricon[aria-expanded="true"]{background:var(--brand-soft); color:var(--brand)}
+.rfly{
+  position:fixed; z-index:45; width:232px; overflow:auto;
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  box-shadow:0 16px 40px color-mix(in srgb, var(--text) 14%, transparent);
+  padding:8px;
+}
+.rfly-title{font-size:13px; font-weight:600; color:var(--text); padding:6px 10px 8px}
 .rfoot{margin-block-start:auto; border-block-start:1px solid var(--border); padding-block-start:13px; display:flex; align-items:center; gap:10px; padding:10px 6px 2px; font-size:12px; color:var(--muted); white-space:nowrap; text-decoration:none; border-radius:9px}
 .rfoot:hover{background:var(--hover); color:var(--muted)}
 .rfoot.on{background:var(--brand-soft)}
@@ -109,10 +138,15 @@ svg{display:block}
 .tsearch-desc{font-size:11.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .tsearch-empty,.tsearch-hint{padding:10px; font-size:12px; color:var(--faint)}
 .tsearch-hint{border-block-start:1px solid var(--border); margin-block-start:4px}
-.tright{display:flex; align-items:center; gap:8px; margin-inline-start:auto}
+.tright{display:flex; align-items:center; gap:8px; margin-inline-start:auto; flex:none}
 .co{display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; padding-inline-start:8px; border-inline-start:1px solid var(--border); white-space:nowrap}
 .co .av{width:26px; height:26px; border-radius:8px; background:var(--brand-soft); color:var(--brand); display:grid; place-items:center; font-size:10px; font-weight:700; flex:none}
-.langbtn{font-size:12px; font-weight:600; padding:6px 11px; border-radius:9px; border:1px solid var(--border-2); background:var(--surface); color:var(--muted); cursor:pointer; white-space:nowrap}
+.langbtn{
+  display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box;
+  height:40px; min-height:40px; padding:0 12px; border-radius:9px;
+  border:1px solid var(--border-2); background:var(--surface); color:var(--muted);
+  font-size:12px; font-weight:600; line-height:1; cursor:pointer; white-space:nowrap;
+}
 .langbtn:hover{color:var(--text); background:var(--hover)}
 
 .page{padding:18px; display:flex; flex-direction:column; gap:16px}
@@ -706,13 +740,65 @@ td.pick{width:38px; padding-inline-end:0}
 .coempty{padding:10px 12px; font-size:12.5px; color:var(--muted)}
 .coerr{padding:8px 12px; font-size:12px; color:var(--bad)}
 
+/* ── Notification inbox ──────────────────────────────────────────────── */
+.nwrap{position:relative}
+.nbell{position:relative}
+.nbadge{
+  position:absolute; top:3px; inset-inline-end:3px; min-width:16px; height:16px; padding:0 4px;
+  border-radius:8px; background:var(--bad); color:#fff; font-size:10px; font-weight:700;
+  display:grid; place-items:center; line-height:1; pointer-events:none;
+  border:2px solid var(--surface);
+}
+.npanel{
+  position:absolute; inset-inline-end:0; top:calc(100% + 8px); width:360px;
+  max-width:calc(100vw - 24px); max-height:min(440px, 70vh); overflow:auto;
+  background:var(--surface); border:1px solid var(--border-2); border-radius:12px;
+  box-shadow:0 16px 40px -12px rgba(17,24,39,.28); z-index:50; padding:6px;
+}
+.nhead{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 10px 6px}
+.nhead h2{margin:0; font-size:13px; font-weight:600}
+.nlist{display:flex; flex-direction:column; gap:2px}
+.nsection{display:flex; flex-direction:column; gap:2px}
+.nsection + .nsection{margin-top:6px; padding-top:6px; border-top:1px solid var(--border)}
+.nsection-label{margin:0; padding:4px 10px 2px; font-size:11px; font-weight:600; color:var(--faint)}
+.nrow{display:flex; align-items:flex-start; gap:10px; padding:8px 8px 8px 10px; border-radius:8px}
+.nrow:hover{background:var(--hover)}
+.ndot{width:7px; height:7px; margin-top:6px; border-radius:50%; background:var(--brand); flex:none}
+.nrow-todo .ndot{background:var(--warn)}
+.nrow-copy{min-width:0; flex:1; display:flex; flex-direction:column; gap:2px}
+.nrow-main{
+  font-size:13px; font-weight:600; color:inherit; text-decoration:none; text-align:start; line-height:1.35;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.nrow-main:hover{color:var(--brand)}
+.nmeta{display:flex; flex-wrap:wrap; align-items:baseline; margin:0; font-size:12px; color:var(--muted)}
+.nmeta > * + *::before{content:"·"; margin-inline:6px; color:var(--faint)}
+.nmeta time{color:var(--faint)}
+.nmore,.nempty,.nerr{font-size:12px; color:var(--muted)}
+.nempty,.nerr{padding:16px 10px 14px}
+.nempty-title{margin:0 0 4px; color:var(--text); font-weight:600}
+.nerr p,.nempty p{margin:0}
+.nmore{margin:6px 10px 8px}
+.nmark{
+  border:0; background:transparent; color:var(--brand); font:inherit; font-size:12px; font-weight:600;
+  cursor:pointer; padding:4px 6px; border-radius:6px; white-space:nowrap;
+}
+.nmark:hover{background:var(--brand-soft)}
+.ncheck{
+  width:28px; height:28px; flex:none; display:grid; place-items:center; padding:0;
+  color:var(--faint);
+}
+.ncheck:hover{color:var(--brand)}
+.nskel{height:48px; border-radius:8px; background:var(--sunk)}
+.nbell:focus-visible,.nrow-main:focus-visible,.nmark:focus-visible{outline:2px solid var(--brand); outline-offset:2px}
+
 /* ── User menu (top-right avatar + dropdown) ─────────────────────────── */
 .umwrap{position:relative}
 .umavbtn{
-  width:34px; height:34px; border-radius:50%; border:2px solid var(--border-2);
+  width:40px; height:40px; border-radius:50%; border:2px solid var(--border-2);
   background:var(--brand-soft); color:var(--brand);
   display:grid; place-items:center; font-size:12px; font-weight:700; cursor:pointer;
-  transition:border-color .15s;
+  transition:border-color .15s; flex:none;
 }
 .umavbtn:hover,.umavbtn[aria-expanded="true"]{border-color:var(--brand)}
 .umdrop{
@@ -918,7 +1004,7 @@ td.pick{width:38px; padding-inline-end:0}
    foot), so the top bar is being tapped, not clicked — but the 44px floors
    above stop at 760px. These three are the only controls up there. */
 @media (min-width:761px) and (max-width:900px){
-  .langbtn{min-height:44px}
+  .langbtn{height:44px; min-height:44px}
   .iconbtn,.umavbtn{width:44px; height:44px; min-width:44px; min-height:44px}
 }
 

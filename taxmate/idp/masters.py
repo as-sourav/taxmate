@@ -1,7 +1,7 @@
 """Consent-based related masters for Scan create.
 
 Unattended inventing stays off. The clerk confirms each proposal, then
-TaxMate inserts Supplier / Customer / Item (and Address) before the draft.
+TaxMate inserts UOM, Supplier, Customer, and Item (and Address) before the draft.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 from taxmate.uae.constants import UAE_EMIRATES
 
 # Links the scan may create after the clerk confirms. Everything else blocks.
-CREATABLE: frozenset[str] = frozenset({"Supplier", "Customer", "Item"})
+CREATABLE: frozenset[str] = frozenset({"UOM", "Supplier", "Customer", "Item"})
 EMIRATES: tuple[str, ...] = tuple(UAE_EMIRATES)
 
 _PARTY_LABEL: dict[str, str] = {
@@ -116,6 +116,9 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 		return
 	doctype = str(data.get("doctype") or "")
 	body = ocr_text.replace("\r", "")
+	if "\\n" in body and body.count("\n") < 2:
+		body = body.replace("\\n", "\n").replace("\\t", "\t")
+	_fill_printed_header(header, body, doctype)
 
 	if doctype.startswith("Purchase") or doctype == "Supplier Quotation":
 		if not str(header.get("supplier") or "").strip():
@@ -153,9 +156,9 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 						header["state"] = state
 						header["vat_emirate"] = state
 		if not str(header.get("phone") or "").strip():
-			m = re.search(r"(\+\d{8,15})", body)
+			m = re.search(r"(\+\d[\d\s-]{7,20}\d)", body)
 			if m:
-				header["phone"] = m.group(1)
+				header["phone"] = re.sub(r"[\s-]+", " ", m.group(1)).strip()
 
 	if doctype.startswith("Sales") or doctype in ("Quotation", "Delivery Note"):
 		if not str(header.get("customer") or "").strip():
@@ -165,6 +168,7 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 
 	items = data.get("items") if isinstance(data.get("items"), list) else []
 	supplier_hint = str(header.get("supplier") or header.get("account_name") or "").strip().lower()
+	parsed_lines = _parse_tax_invoice_lines(body)
 	bad = not items
 	for row in items:
 		if not isinstance(row, dict):
@@ -184,7 +188,10 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 		):
 			bad = True
 			break
-	if bad:
+	current_rows = [row for row in items if isinstance(row, dict)]
+	if parsed_lines and (bad or _rows_are_units(items) or len(parsed_lines) > len(current_rows)):
+		data["items"] = parsed_lines
+	elif bad:
 		desc = ""
 		for m in re.finditer(r"(?m)^(?P<line>.{20,180})$", body):
 			line = re.sub(r"\s+", " ", m.group("line")).strip()
@@ -234,6 +241,227 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 					"uom": "Nos",
 				}
 			]
+
+
+# Printed units that a column scan must not treat as the product.
+_UNIT_TOKENS: frozenset[str] = frozenset(
+	{
+		"btl",
+		"btls",
+		"bottle",
+		"bottles",
+		"cup",
+		"cups",
+		"pkt",
+		"pkts",
+		"packet",
+		"packets",
+		"tub",
+		"tubs",
+		"tray",
+		"trays",
+		"nos",
+		"pcs",
+		"pc",
+		"piece",
+		"pieces",
+		"kg",
+		"gm",
+		"gms",
+		"ltr",
+		"ml",
+		"box",
+		"boxes",
+		"ctn",
+		"carton",
+		"cartons",
+		"set",
+		"pair",
+		"dozen",
+		"unit",
+		"units",
+		"bag",
+		"bags",
+		"can",
+		"cans",
+		"roll",
+		"rolls",
+		"pack",
+		"packs",
+	}
+)
+
+_TAX_LINE = re.compile(
+	r"^\s*(?P<idx>\d{1,3})\s+"
+	r"(?P<code>[A-Z][A-Z0-9-]{2,})\s+"
+	r"(?P<body>.+?)\s+"
+	r"(?P<qty>\d+(?:\.\d+)?)\s+"
+	r"(?P<uom>[A-Za-z]{2,12})\s+"
+	r"(?P<rate>\d[\d,]*\.\d{2})\s+"
+	r"(?P<disc>-|—|\d[\d,]*\.\d{2})\s+"
+	r"(?P<taxable>\d[\d,]*\.\d{2})\s+"
+	r"(?P<vat>\d[\d,]*\.\d{2})\s+"
+	r"(?P<total>\d[\d,]*\.\d{2})\s*$"
+)
+
+
+def _unit_token(value: str) -> bool:
+	token = re.sub(r"[^A-Za-z]", "", value or "").lower()
+	return bool(token) and token in _UNIT_TOKENS
+
+
+def _rows_are_units(items: list[Any]) -> bool:
+	"""True when the extract parked the UOM column in the item name."""
+	labels: list[str] = []
+	for row in items:
+		if not isinstance(row, dict):
+			continue
+		label = str(row.get("item_name") or row.get("item_code") or "").strip()
+		if label:
+			labels.append(label)
+	if len(labels) < 2:
+		return False
+	hits = sum(1 for label in labels if _unit_token(label))
+	return hits >= max(2, (len(labels) + 1) // 2)
+
+
+def _money(token: str) -> float:
+	text = str(token or "").strip()
+	if text in {"", "-", "—"}:
+		return 0.0
+	return float(text.replace(",", ""))
+
+
+def _parse_tax_invoice_lines(body: str) -> list[dict[str, Any]]:
+	"""Read a # / code / description / qty / UOM / rate / discount / taxable / VAT / total table."""
+	rows: list[dict[str, Any]] = []
+	seen: set[str] = set()
+	for line in body.splitlines():
+		match = _TAX_LINE.match(line)
+		if not match:
+			continue
+		code = match.group("code").strip()
+		if code in seen or _unit_token(code):
+			continue
+		qty = _money(match.group("qty"))
+		rate = _money(match.group("rate"))
+		disc = _money(match.group("disc"))
+		taxable = _money(match.group("taxable"))
+		vat = _money(match.group("vat"))
+		total = _money(match.group("total"))
+		if qty <= 0 or rate < 0:
+			continue
+		net = round(qty * rate - disc, 2)
+		if abs(net - taxable) > 0.05 and abs(round(taxable + vat, 2) - total) > 0.05:
+			continue
+		name = re.sub(r"\s+", " ", match.group("body")).strip(" -")
+		uom = match.group("uom").strip()
+		row: dict[str, Any] = {
+			"item_code": code,
+			"item_name": name or code,
+			"description": name or code,
+			"qty": qty,
+			"quantity": qty,
+			"uom": uom,
+			"stock_uom": uom,
+			"rate": rate,
+			"unit_price": rate,
+			"amount": taxable,
+			"conversion_factor": 1,
+			"stock_qty": qty,
+			"base_rate": rate,
+			"base_amount": taxable,
+		}
+		if disc > 0:
+			row["discount_amount"] = disc
+		rows.append(row)
+		seen.add(code)
+	return rows if len(rows) >= 2 else []
+
+
+def _letterhead_name(body: str) -> str:
+	match = re.search(
+		r"(?m)^([A-Z][A-Za-z0-9&.,'()-]{2,}(?:\s+[A-Za-z0-9&.,'()-]+){0,8})\s{2,}TAX\s+INVOICE",
+		body,
+	)
+	if match:
+		return re.sub(r"\s+", " ", match.group(1)).strip(" -")
+	match = re.search(r"(?m)^([^\n]{4,80})\n[ \t]*TAX\s+INVOICE", body, re.IGNORECASE)
+	return match.group(1).strip() if match else ""
+
+
+def _bill_to_name(body: str) -> str:
+	match = re.search(r"Bill\s*To\s*:?\s*\n+\s*(.+)", body, re.IGNORECASE)
+	if not match:
+		return ""
+	return match.group(1).strip().split("\n")[0].strip()
+
+
+def _split_trns(body: str) -> tuple[str, str]:
+	parts = re.split(r"Bill\s*To", body, maxsplit=1, flags=re.IGNORECASE)
+
+	def first(chunk: str) -> str:
+		found = re.search(r"TRN\s*:?\s*(1\d{14})", chunk)
+		return found.group(1) if found else ""
+
+	if len(parts) == 2:
+		return first(parts[0]), first(parts[1])
+	found = re.findall(r"TRN\s*:?\s*(1\d{14})", body)
+	seller = found[0] if found else ""
+	buyer = found[1] if len(found) > 1 else ""
+	return seller, buyer
+
+
+def _fill_printed_header(header: dict[str, Any], body: str, doctype: str) -> None:
+	"""Put printed seller, dates, currency, and totals on the header the draft will use."""
+	# A VAT amount is not a Purchase Taxes and Charges Template link.
+	tax_link = str(header.get("taxes_and_charges") or "").strip().replace(" ", "")
+	if tax_link and re.fullmatch(r"[\d,.]+", tax_link):
+		header.pop("taxes_and_charges", None)
+	purchase = doctype.startswith("Purchase") or doctype == "Supplier Quotation"
+	seller_trn, buyer_trn = _split_trns(body)
+	if purchase:
+		current = str(header.get("supplier") or "").strip()
+		letter = _letterhead_name(body)
+		bill_to = _bill_to_name(body)
+		if letter and (
+			not current or _unit_token(current) or (bill_to and current.lower() == bill_to.lower())
+		):
+			header["supplier"] = letter
+		tax = re.sub(r"\s+", "", str(header.get("tax_id") or ""))
+		if seller_trn and (not tax or (buyer_trn and tax == buyer_trn)):
+			header["tax_id"] = seller_trn
+	if not str(header.get("currency") or "").strip() and re.search(r"\bAED\b|\(AED\)", body):
+		header["currency"] = "AED"
+	if not str(header.get("bill_no") or "").strip():
+		match = re.search(r"Invoice\s*No\.?\s*:?\s*([A-Z0-9][A-Z0-9-]*)", body, re.IGNORECASE)
+		if match:
+			header["bill_no"] = match.group(1)
+	if not str(header.get("posting_date") or "").strip():
+		match = re.search(r"Invoice\s*Date\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", body, re.IGNORECASE)
+		if match:
+			parsed = _parse_ocr_date(match.group(1))
+			if parsed:
+				header["posting_date"] = parsed
+	if not str(header.get("due_date") or "").strip():
+		match = re.search(r"Due\s*Date\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", body, re.IGNORECASE)
+		if match:
+			parsed = _parse_ocr_date(match.group(1))
+			if parsed:
+				header["due_date"] = parsed
+	if not str(header.get("net_total") or "").strip():
+		match = re.search(r"Total\s+Taxable\s+Amount\s+([\d,]+\.\d{2})", body, re.IGNORECASE)
+		if match:
+			header["net_total"] = _money(match.group(1))
+	if not str(header.get("grand_total") or "").strip():
+		match = re.search(r"Grand\s+Total\s*\(AED\)\s+([\d,]+\.\d{2})", body, re.IGNORECASE)
+		if match:
+			header["grand_total"] = _money(match.group(1))
+	if not _emirate(header):
+		head = body.split("Item Code", 1)[0]
+		found = [name for name in EMIRATES if re.search(rf"\b{re.escape(name)}\b", head, re.IGNORECASE)]
+		if len(found) == 1:
+			header["vat_emirate"] = found[0]
 
 
 def normalize_extract(extracted: dict[str, Any], *, promote_items: bool = True) -> None:
@@ -460,8 +688,22 @@ def split_missing(rows: Any) -> tuple[list[dict[str, str]], list[dict[str, str]]
 	return creatable, blocked
 
 
+def link_readable(doctype: str, name: str | None) -> bool:
+	"""True when this user may read the named document.
+
+	``db.exists`` ignores company tenancy. A supplier tagged to another company
+	still exists, and Purchase Invoice then raises an empty PermissionError.
+	Callers: party_by_trn, bind_parties_by_trn, _create_item, scope_extract_to_company.
+	"""
+	import frappe
+
+	if not name or not frappe.db.exists(doctype, name):
+		return False
+	return bool(frappe.has_permission(doctype, "read", name))
+
+
 def party_by_trn(doctype: str, trn: str | None) -> str | None:
-	"""Match Supplier or Customer by normalized tax_id."""
+	"""Match Supplier or Customer by normalized tax_id, for this company only."""
 	if doctype not in ("Supplier", "Customer"):
 		return None
 	from taxmate.uae.validation import normalize_trn
@@ -473,11 +715,13 @@ def party_by_trn(doctype: str, trn: str | None) -> str | None:
 
 	# Static SQL per doctype — table name is never user input.
 	query = {
-		"Supplier": "select name from `tabSupplier` where replace(ifnull(tax_id, ''), ' ', '') = %s limit 1",
-		"Customer": "select name from `tabCustomer` where replace(ifnull(tax_id, ''), ' ', '') = %s limit 1",
+		"Supplier": "select name from `tabSupplier` where replace(ifnull(tax_id, ''), ' ', '') = %s",
+		"Customer": "select name from `tabCustomer` where replace(ifnull(tax_id, ''), ' ', '') = %s",
 	}[doctype]
-	row = frappe.db.sql(query, cleaned)
-	return row[0][0] if row else None
+	for (name,) in frappe.db.sql(query, cleaned):
+		if link_readable(doctype, name):
+			return name
+	return None
 
 
 def bind_parties_by_trn(extracted: dict[str, Any]) -> None:
@@ -495,11 +739,19 @@ def bind_parties_by_trn(extracted: dict[str, Any]) -> None:
 			continue
 		import frappe
 
-		if frappe.db.exists(doctype, raw):
+		if link_readable(doctype, raw):
 			continue
-		matched = party_by_trn(doctype, trn) or party_by_trn(doctype, raw)
+		matched = (
+			party_by_trn(doctype, trn)
+			or party_by_trn(doctype, raw)
+			or _usable_party_by_name(doctype, raw)
+		)
 		if matched:
 			header[field] = matched
+		elif frappe.db.exists(doctype, raw):
+			# Same legal name, other company. Leave the link empty so this
+			# company gets its own supplier instead of a permission error on save.
+			header.pop(field, None)
 
 
 def _header_trn(header: dict[str, Any]) -> str:
@@ -510,20 +762,94 @@ def _header_trn(header: dict[str, Any]) -> str:
 	return ""
 
 
+def scope_extract_to_company(extracted: dict[str, Any]) -> None:
+	"""Drop links this user cannot read.
+
+	Another company's supplier still matches by name. Saving that link raises
+	an empty PermissionError, which the desk used to show as a failed file read.
+	"""
+	if not extracted.get("success"):
+		return
+	data = extracted.get("extracted_data")
+	if not isinstance(data, dict):
+		return
+	changed = False
+	header = data.get("header")
+	if isinstance(header, dict):
+		trn = _header_trn(header)
+		for doctype, field in _PARTY_LINK.items():
+			raw = str(header.get(field) or "").strip()
+			if not raw:
+				continue
+			if link_readable(doctype, raw):
+				continue
+			matched = party_by_trn(doctype, trn) or _usable_party_by_name(doctype, raw)
+			if matched:
+				header[field] = matched
+			else:
+				# Keep the printed name off the Link. The document name is unique
+				# site-wide, so this company needs its own supplier record.
+				printed = extracted.setdefault("_printed_parties", {})
+				if isinstance(printed, dict):
+					printed[field] = raw
+				header.pop(field, None)
+			changed = True
+	items = data.get("items")
+	if isinstance(items, list):
+		for row in items:
+			if not isinstance(row, dict):
+				continue
+			code = str(row.get("item_code") or "").strip()
+			if code and not link_readable("Item", code):
+				row.pop("item_code", None)
+				changed = True
+	if changed:
+		from taxmate.idp.post_map import refresh_validation
+
+		refresh_validation(extracted)
+
+
+def align_scanned_items(extracted: dict[str, Any]) -> None:
+	"""Point existing items at a fitting leaf group when they sit in the bucket group."""
+	data = extracted.get("extracted_data") or {}
+	for row in data.get("items") or []:
+		if not isinstance(row, dict):
+			continue
+		code = str(row.get("item_code") or "").strip()
+		if not link_readable("Item", code):
+			continue
+		label = str(row.get("item_name") or row.get("description") or code)
+		_align_item_group(code, label, "")
+
+
+def party_proposals_for_company(extracted: dict[str, Any]) -> list[dict[str, Any]]:
+	"""Confirmed supplier/customer cards for parties this company still does not have."""
+	rows: list[dict[str, Any]] = []
+	for row in build_proposals(extracted):
+		if row.get("doctype") not in ("Supplier", "Customer"):
+			continue
+		copied = dict(row)
+		copied["confirmed"] = True
+		rows.append(copied)
+	return rows
+
+
 def build_proposals(extracted: dict[str, Any]) -> list[dict[str, Any]]:
 	"""One consent card per missing creatable master. Prefills what the file carried."""
 	validation = extracted.get("validation") or {}
 	creatable, _blocked = split_missing(validation.get("missing_masters"))
-	if not creatable:
-		return []
 	data = extracted.get("extracted_data") or {}
+	if not creatable and not (extracted.get("_printed_parties") or {}):
+		return []
 	header = dict(data.get("header") or {})
 	items = [row for row in (data.get("items") or []) if isinstance(row, dict)]
 	proposals: list[dict[str, Any]] = []
 	seen: set[str] = set()
 	for row in creatable:
 		doctype = row["doctype"]
-		if doctype in ("Supplier", "Customer"):
+		if doctype == "UOM":
+			proposal = _uom_proposal(row)
+		elif doctype in ("Supplier", "Customer"):
 			proposal = _party_proposal(doctype, row, header)
 		elif doctype == "Item":
 			proposal = _item_proposal(row, items)
@@ -533,7 +859,51 @@ def build_proposals(extracted: dict[str, Any]) -> list[dict[str, Any]]:
 			continue
 		seen.add(proposal["key"])
 		proposals.append(proposal)
+	_append_printed_party(extracted, proposals, seen)
+	proposals.sort(key=lambda card: {"UOM": 0, "Supplier": 1, "Customer": 2, "Item": 3}.get(card["doctype"], 9))
 	return proposals
+
+
+def _append_printed_party(
+	extracted: dict[str, Any], proposals: list[dict[str, Any]], seen: set[str]
+) -> None:
+	"""Propose a party when the only match belongs to another company.
+
+	Schema then reports a missing field, not a missing master, so the card
+	would otherwise never appear.
+	"""
+	data = extracted.get("extracted_data") or {}
+	header = data.get("header") if isinstance(data.get("header"), dict) else {}
+	link = _PARTY_BY_DOCTYPE.get(str(data.get("doctype") or ""))
+	if not link or str(header.get(link) or "").strip():
+		return
+	raw = str((extracted.get("_printed_parties") or {}).get(link) or "").strip()
+	if not raw:
+		return
+	party_doctype = "Supplier" if link == "supplier" else "Customer"
+	if any(row.get("doctype") == party_doctype for row in proposals):
+		return
+	proposal = _party_proposal(party_doctype, {"name": raw, "field": link, "doctype": party_doctype}, header)
+	if proposal and proposal["key"] not in seen:
+		seen.add(proposal["key"])
+		proposals.append(proposal)
+
+
+def _uom_proposal(missing: dict[str, str]) -> dict[str, Any] | None:
+	name = str(missing.get("name") or "").strip()
+	if not name:
+		return None
+	return {
+		"key": f"uom:{name}",
+		"doctype": "UOM",
+		"link_field": str(missing.get("field") or "uom"),
+		"title": name,
+		"source_fields": {"uom_name": name},
+		"required_fields": [_field("uom_name", "idp.field.uom", name)],
+		"optional_fields": [],
+		"consent_label_key": "idp.field.uom",
+		"confirmed": False,
+	}
 
 
 def _party_address_line(doctype: str, header: dict[str, Any]) -> str:
@@ -603,7 +973,8 @@ def _item_proposal(missing: dict[str, str], items: list[dict[str, Any]]) -> dict
 	existing = str((row or {}).get("item_code") or "").strip()
 	code = existing if existing and not _looks_like_description(existing) else _slug_code(label)
 	uom = str((row or {}).get("uom") or (row or {}).get("stock_uom") or "Nos").strip() or "Nos"
-	group = _default_item_group()
+	# Item Group is a tree leaf. Do not copy Stock Settings' first leaf onto goods.
+	group = item_group_for_label(label)
 	source = {
 		"item_code": code,
 		"item_name": label,
@@ -615,7 +986,15 @@ def _item_proposal(missing: dict[str, str], items: list[dict[str, Any]]) -> dict
 		_field("item_name", "idp.field.itemName", source["item_name"]),
 		_field("stock_uom", "idp.field.uom", source["stock_uom"]),
 	]
-	optional = [_field("item_group", "idp.field.itemGroup", source["item_group"])]
+	leaves = leaf_item_groups()
+	optional = [
+		_field(
+			"item_group",
+			"idp.field.itemGroup",
+			source["item_group"],
+			options=leaves or None,
+		)
+	]
 	return {
 		"key": f"item:{label}",
 		"doctype": "Item",
@@ -626,7 +1005,7 @@ def _item_proposal(missing: dict[str, str], items: list[dict[str, Any]]) -> dict
 		"required_fields": required,
 		"optional_fields": optional,
 		"consent_label_key": "idp.propose.item",
-		"confirmed": False,
+		"confirmed": True,
 	}
 
 
@@ -930,6 +1309,17 @@ def _parse_ocr_date(value: str) -> str:
 		return ""
 	if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
 		return text
+	# UAE tax invoices print the day first: 09/10/2026 is 9 October 2026.
+	slash = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", text)
+	if slash:
+		day = int(slash.group(1))
+		month = int(slash.group(2))
+		year = int(slash.group(3))
+		if year < 100:
+			year += 2000
+		if 1 <= day <= 31 and 1 <= month <= 12:
+			return f"{year:04d}-{month:02d}-{day:02d}"
+		return ""
 	# 18th August,2026 / 18 August 2026 / 18th Aug'26
 	m = re.search(
 		r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})'?[,\s]+(\d{2,4})",
@@ -1025,17 +1415,114 @@ def _clean_item_label(label: str) -> str:
 	return text.strip(" -,") or label.strip()
 
 
-def _default_item_group() -> str:
-	"""Stock Settings default, else first leaf Item Group. Empty when DB is unavailable."""
+# Printed words → fragments of a leaf Item Group name. Item is the stock master.
+# Item Group is the tree. "Consulting Services" is not a dairy item.
+_ITEM_GROUP_HINTS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+	(("ice cream", "icecream", "frozen"), ("frozen",)),
+	(("milk", "laban", "labneh", "yoghurt", "yogurt", "cheese", "butter", "cream", "ghee", "egg"), ("dairy",)),
+	(("juice", "soda", "coffee", "tea", "cola", "beverage"), ("beverage", "drink")),
+	(("bread", "bakery", "cake", "bun"), ("bakery",)),
+	(("chicken", "mutton", "beef", "meat", "poultry"), ("meat", "poultry")),
+	(("fish", "shrimp", "prawn", "seafood"), ("seafood", "fish")),
+	(("vegetable", "fruit", "produce", "tomato", "onion", "potato"), ("produce", "vegetable", "fruit")),
+	(("snack", "chocolate", "biscuit", "chips", "confection"), ("snack", "confection")),
+	(("rice", "flour", "grain", "lentil"), ("rice", "grain", "flour")),
+	(("cooking oil", "olive oil", "sunflower"), ("oil",)),
+	(("spice", "condiment", "sauce"), ("spice", "condiment")),
+	(("detergent", "cleaner", "soap"), ("clean", "household")),
+	(("consulting", "retainer", "professional fee"), ("consulting",)),
+	(("service charge", "services"), ("service",)),
+)
+
+
+def _has_token(text: str, token: str) -> bool:
+	# Optional plural so "eggs" still matches the egg hint.
+	return re.search(rf"(?<![a-z0-9]){re.escape(token)}s?(?![a-z0-9])", text) is not None
+
+
+def leaf_item_groups() -> list[str]:
+	"""Leaf Item Groups only. Group nodes cannot be an Item's item_group."""
+	try:
+		import frappe
+
+		return frappe.get_all(
+			"Item Group", filters={"is_group": 0}, pluck="name", order_by="name asc"
+		)
+	except Exception:
+		return []
+
+
+def _generic_item_group() -> str:
+	"""Stock Settings, else the oldest leaf. A bucket, not a match for the line."""
 	try:
 		import frappe
 
 		group = frappe.db.get_single_value("Stock Settings", "item_group")
 		if group:
 			return str(group)
-		return str(frappe.db.get_value("Item Group", {"is_group": 0}, "name") or "")
+		return str(
+			frappe.db.get_value("Item Group", {"is_group": 0}, "name", order_by="creation asc") or ""
+		)
 	except Exception:
 		return ""
+
+
+def _default_item_group() -> str:
+	return _generic_item_group()
+
+
+def _is_leaf_group(name: str) -> bool:
+	if not name:
+		return False
+	try:
+		import frappe
+
+		if not frappe.db.exists("Item Group", name):
+			return False
+		return not frappe.db.get_value("Item Group", name, "is_group")
+	except Exception:
+		return False
+
+
+def _is_dump_group(name: str) -> bool:
+	"""True for the site-wide fallback and for a services group used as a bucket."""
+	if not name or name == _generic_item_group():
+		return True
+	folded = name.lower()
+	return "consulting" in folded or folded in {"services", "service"}
+
+
+def item_group_for_label(label: str) -> str:
+	"""Leaf Item Group whose name fits the printed item. Empty when nothing fits."""
+	text = (label or "").lower()
+	if not text:
+		return ""
+	leaves = leaf_item_groups()
+	for words, fragments in _ITEM_GROUP_HINTS:
+		if not any(_has_token(text, word) for word in words):
+			continue
+		matches = [name for name in leaves if any(frag in name.lower() for frag in fragments)]
+		if not matches:
+			continue
+		for frag in fragments:
+			tight = [name for name in matches if frag in name.lower()]
+			if tight:
+				return sorted(tight, key=lambda name: (len(name), name))[0]
+		return sorted(matches, key=lambda name: (len(name), name))[0]
+	return ""
+
+
+def resolve_item_group(label: str, requested: str | None) -> str:
+	"""Leaf group for this item. A services bucket does not win over a dairy match."""
+	specific = item_group_for_label(label)
+	asked = (requested or "").strip()
+	if asked and _is_leaf_group(asked) and not _is_dump_group(asked):
+		return asked
+	if specific:
+		return specific
+	if asked and _is_leaf_group(asked):
+		return asked
+	return _generic_item_group()
 
 
 def _slug_code(label: str) -> str:
@@ -1102,11 +1589,19 @@ def create_confirmed(
 	savepoint = "taxmate_idp_masters"
 	frappe.db.savepoint(savepoint)
 
-	def fail(error_key: str) -> dict[str, Any]:
+	def fail(error_key: str, detail: str | None = None) -> dict[str, Any]:
 		frappe.db.rollback(save_point=savepoint)
-		return {"ok": False, "error_key": error_key, "created": {}}
+		out: dict[str, Any] = {"ok": False, "error_key": error_key, "created": {}}
+		if detail:
+			out["detail"] = str(detail)[:400]
+		return out
 
-	for row in proposals:
+	# Units first, then the party, then items that stock in those units.
+	ordered = sorted(
+		proposals,
+		key=lambda row: {"UOM": 0, "Supplier": 1, "Customer": 2, "Item": 3}.get(str(row.get("doctype") or ""), 9),
+	)
+	for row in ordered:
 		if not row.get("confirmed"):
 			return fail("idp.propose.needConsent")
 		doctype = str(row.get("doctype") or "")
@@ -1128,7 +1623,10 @@ def create_confirmed(
 				return fail("idp.propose.needFields")
 		values = _values_from_proposal(row)
 		try:
-			if doctype == "Supplier":
+			if doctype == "UOM":
+				name = _create_uom(values)
+				created[f"uom:{name}"] = name
+			elif doctype == "Supplier":
 				created["supplier"] = _create_supplier(values)
 			elif doctype == "Customer":
 				created["customer"] = _create_customer(values)
@@ -1139,10 +1637,13 @@ def create_confirmed(
 				if idx is not None:
 					created[f"item:{idx}"] = name
 		except frappe.PermissionError:
-			return fail("idp.denied")
-		except Exception:
+			return fail(
+				"idp.denied",
+				"This draft was not saved. A supplier, customer, or item on it belongs to another company.",
+			)
+		except Exception as exc:
 			frappe.log_error(title="TaxMate IDP master create failed", message=frappe.get_traceback())
-			return fail("idp.propose.failed")
+			return fail("idp.propose.failed", str(exc) or None)
 	return {"ok": True, "created": created}
 
 
@@ -1176,6 +1677,22 @@ def _stamp_custom_company(payload: dict[str, Any]) -> dict[str, Any]:
 	return payload
 
 
+def _disambiguated_party_name(legal: str) -> str:
+	"""Buying Settings names a supplier by its name, which is unique on the site.
+
+	Another company's row already holds that name. This company gets its own
+	record, with the company abbreviation on the name.
+	"""
+	import frappe
+
+	from taxmate.utils.company import get_default_company
+
+	company = get_default_company() or ""
+	abbr = frappe.db.get_value("Company", company, "abbr") if company else ""
+	token = str(abbr or "CO").strip() or "CO"
+	return f"{legal.strip()} - {token}"[:140]
+
+
 def _create_supplier(values: dict[str, str]) -> str:
 	import frappe
 
@@ -1183,6 +1700,11 @@ def _create_supplier(values: dict[str, str]) -> str:
 	existing = _existing_party("Supplier", name, values.get("tax_id"))
 	if existing:
 		return existing
+	if frappe.db.exists("Supplier", name):
+		name = _disambiguated_party_name(name)
+		existing = _existing_party("Supplier", name, values.get("tax_id"))
+		if existing:
+			return existing
 	group = (
 		frappe.db.get_single_value("Buying Settings", "supplier_group")
 		or frappe.db.get_value("Supplier Group", {"is_group": 0}, "name")
@@ -1200,7 +1722,13 @@ def _create_supplier(values: dict[str, str]) -> str:
 			}
 		)
 	)
-	doc.insert()
+	try:
+		doc.insert()
+	except frappe.DuplicateEntryError:
+		usable = _usable_party_by_name("Supplier", name)
+		if usable:
+			return usable
+		raise
 	if _has_address(values):
 		_attach_address_contact("Supplier", doc.name, name, values)
 	return doc.name
@@ -1213,6 +1741,11 @@ def _create_customer(values: dict[str, str]) -> str:
 	existing = _existing_party("Customer", name, values.get("tax_id"))
 	if existing:
 		return existing
+	if frappe.db.exists("Customer", name):
+		name = _disambiguated_party_name(name)
+		existing = _existing_party("Customer", name, values.get("tax_id"))
+		if existing:
+			return existing
 	group = (
 		frappe.db.get_single_value("Selling Settings", "customer_group")
 		or frappe.db.get_value("Customer Group", {"is_group": 0}, "name")
@@ -1233,10 +1766,60 @@ def _create_customer(values: dict[str, str]) -> str:
 			}
 		)
 	)
-	doc.insert()
+	try:
+		doc.insert()
+	except frappe.DuplicateEntryError:
+		usable = _usable_party_by_name("Customer", name)
+		if usable:
+			return usable
+		raise
 	if _has_address(values):
 		_attach_address_contact("Customer", doc.name, name, values)
 	return doc.name
+
+
+def _create_uom(values: dict[str, str]) -> str:
+	import frappe
+
+	name = (values.get("uom_name") or values.get("uom") or "").strip()
+	if not name:
+		frappe.throw("Unit of measure is required")
+	if frappe.db.exists("UOM", name):
+		return name
+	doc = frappe.get_doc({"doctype": "UOM", "uom_name": name})
+	try:
+		doc.insert()
+	except frappe.DuplicateEntryError:
+		# Another clerk saved the same unit between the exists check and insert.
+		if frappe.db.exists("UOM", name):
+			return name
+		raise
+	return doc.name
+
+
+def _company_item_code(code: str) -> str:
+	"""Item codes are unique on the site. Another company's item keeps its code."""
+	import frappe
+
+	from taxmate.utils.company import get_default_company
+
+	company = get_default_company() or ""
+	abbr = frappe.db.get_value("Company", company, "abbr") if company else ""
+	token = re.sub(r"[^A-Za-z0-9]", "", str(abbr or ""))[:8] or "CO"
+	return f"{code[:130]}-{token}"[:140]
+
+
+def _align_item_group(code: str, label: str, requested: str) -> None:
+	"""Move an item off a services bucket when the printed name fits a real leaf."""
+	import frappe
+
+	current = str(frappe.db.get_value("Item", code, "item_group") or "")
+	chosen = resolve_item_group(label, requested or current)
+	if not chosen or chosen == current or not _is_dump_group(current):
+		return
+	if not frappe.has_permission("Item", "write", code):
+		return
+	frappe.db.set_value("Item", code, "item_group", chosen)
 
 
 def _create_item(values: dict[str, str]) -> str:
@@ -1245,17 +1828,26 @@ def _create_item(values: dict[str, str]) -> str:
 	raw_code = values.get("item_code") or values.get("item_name") or "ITEM"
 	# Spaces / punctuation break Item naming for some sites; slug when needed.
 	code = raw_code if re.fullmatch(r"[A-Za-z0-9_-]+", raw_code) else _slug_code(raw_code)
+	label = values.get("item_name") or code
+	asked = values.get("item_group") or ""
 	if frappe.db.exists("Item", code):
-		return code
+		if link_readable("Item", code):
+			_align_item_group(code, label, asked)
+			return code
+		code = _company_item_code(code)
+		if frappe.db.exists("Item", code) and link_readable("Item", code):
+			_align_item_group(code, label, asked)
+			return code
 	by_name = frappe.db.get_value("Item", {"item_name": values.get("item_name")}, "name")
-	if by_name:
+	if by_name and link_readable("Item", by_name):
+		_align_item_group(by_name, label, asked)
 		return by_name
-	group = values.get("item_group") or frappe.db.get_single_value("Stock Settings", "item_group")
-	if not group:
-		group = frappe.db.get_value("Item Group", {"is_group": 0}, "name") or "All Item Groups"
-	uom = values.get("stock_uom") or "Nos"
+	group = resolve_item_group(label, asked)
+	if not group or not _is_leaf_group(group):
+		frappe.throw("Choose a leaf item group for this item")
+	uom = (values.get("stock_uom") or "Nos").strip() or "Nos"
 	if not frappe.db.exists("UOM", uom):
-		uom = "Nos"
+		uom = _create_uom({"uom_name": uom})
 	doc = frappe.get_doc(
 		_stamp_custom_company(
 			{
@@ -1268,20 +1860,41 @@ def _create_item(values: dict[str, str]) -> str:
 			}
 		)
 	)
-	doc.insert()
+	try:
+		doc.insert()
+	except frappe.DuplicateEntryError:
+		if link_readable("Item", code):
+			_align_item_group(code, label, asked)
+			return code
+		scoped = _company_item_code(code)
+		if scoped != code and link_readable("Item", scoped):
+			return scoped
+		if scoped != code and not frappe.db.exists("Item", scoped):
+			retried = dict(values)
+			retried["item_code"] = scoped
+			return _create_item(retried)
+		raise
 	return doc.name
 
 
-def _existing_party(doctype: str, name: str, tax_id: str | None) -> str | None:
+def _usable_party_by_name(doctype: str, name: str) -> str | None:
+	"""Same display name, but only a party this company may read."""
 	import frappe
 
+	if link_readable(doctype, name):
+		return name
+	display = "supplier_name" if doctype == "Supplier" else "customer_name"
+	for candidate in frappe.get_all(doctype, filters={display: name}, pluck="name"):
+		if link_readable(doctype, candidate):
+			return candidate
+	return None
+
+
+def _existing_party(doctype: str, name: str, tax_id: str | None) -> str | None:
 	matched = party_by_trn(doctype, tax_id)
 	if matched:
 		return matched
-	display = "supplier_name" if doctype == "Supplier" else "customer_name"
-	if frappe.db.exists(doctype, name):
-		return name
-	return frappe.db.get_value(doctype, {display: name}, "name")
+	return _usable_party_by_name(doctype, name)
 
 
 def _has_address(values: dict[str, str]) -> bool:

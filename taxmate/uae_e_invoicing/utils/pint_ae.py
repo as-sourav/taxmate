@@ -16,6 +16,7 @@ from taxmate.uae_e_invoicing.constants import (
 	AED_CURRENCY,
 	PINT_AE_CUSTOMIZATION_ID,
 	PINT_AE_PROFILE_ID,
+	credit_note_reason_code,
 )
 from taxmate.uae_e_invoicing.utils.transaction_data import UAETransactionData
 
@@ -77,8 +78,15 @@ def build_payload_from_data(data: dict[str, Any], doc_uuid: str | None = None) -
 			invoice_period["DescriptionCode"] = period["description_code"]
 		payload["InvoicePeriod"] = invoice_period
 
-	if data.get("tax_point_date"):
-		payload["TaxPointDate"] = data["tax_point_date"]
+	# IBR-151-AE: a VAT point date must be before the issue date. The same day
+	# is the normal ERPNext case and must be omitted.
+	tax_point = data.get("tax_point_date")
+	if tax_point and data.get("issue_date") and str(tax_point) < str(data["issue_date"]):
+		payload["TaxPointDate"] = tax_point
+
+	delivery = _postal_address((data.get("customer") or {}).get("address"))
+	if delivery:
+		payload["Delivery"] = {"DeliveryLocation": {"Address": delivery}}
 
 	doc_allowance = data.get("document_allowance")
 	if doc_allowance:
@@ -93,7 +101,7 @@ def build_payload_from_data(data: dict[str, Any], doc_uuid: str | None = None) -
 			}
 		]
 
-	# IBT-022: invoice-level notes; the credit-note reason is also carried as a note
+	# IBT-022: invoice remarks. The credit-note reason is CreditNoteReasonCode, not a note.
 	notes = [note for note in (data.get("notes") or []) if note]
 
 	credit_note = data.get("credit_note")
@@ -104,11 +112,17 @@ def build_payload_from_data(data: dict[str, Any], doc_uuid: str | None = None) -
 			if credit_note["reference"].get("issue_date"):
 				document_reference["IssueDate"] = credit_note["reference"]["issue_date"]
 			payload["BillingReference"] = {"InvoiceDocumentReference": document_reference}
-		if credit_note.get("reason"):
-			notes.append(credit_note["reason"])
+		reason_code = credit_note_reason_code(credit_note.get("reason"))
+		if reason_code:
+			# BTAE-03. Mapped to extensions.ae_creditNoteReasonCode. Not a free-text note.
+			payload["CreditNoteReasonCode"] = reason_code
 
 	if notes:
 		payload["Note"] = notes[0] if len(notes) == 1 else notes
+
+	if data.get("principal_trn"):
+		# BTAE-14. Own key so it is not the seller or buyer VAT identifier (IBR-176-AE).
+		payload["PrincipalTRN"] = data["principal_trn"]
 
 	fz_beneficiary = data["customer"].get("fz_beneficiary_id")
 	if fz_beneficiary:
@@ -130,6 +144,57 @@ def payload_to_json(payload: dict[str, Any]) -> str:
 # ----------------------------------------------------------------------
 
 
+def _postal_address(address: dict[str, Any] | None) -> dict[str, Any] | None:
+	if not address or not address.get("line1"):
+		return None
+	postal: dict[str, Any] = {
+		"StreetName": address.get("line1"),
+		"CityName": address.get("city"),
+		"Country": {"IdentificationCode": address.get("country_code")},
+	}
+	if address.get("line2"):
+		postal["AdditionalStreetName"] = address["line2"]
+	if address.get("postal_zone"):
+		postal["PostalZone"] = address["postal_zone"]
+	if address.get("emirate_code"):
+		postal["CountrySubentityCode"] = address["emirate_code"]
+	return postal
+
+
+# IBR-173-AE checks CompanyID/@schemeAgencyID, not the English label.
+_LEGAL_REGISTRATION_SCHEMES = {
+	"CL": "TL",
+	"CRN": "TL",
+	"TL": "TL",
+	"OTH": "TL",
+	"Commercial/Trade license": "TL",
+	"Emirates ID": "EID",
+	"EID": "EID",
+	"Passport": "PAS",
+	"PAS": "PAS",
+	"Cabinet decision": "CD",
+	"CD": "CD",
+}
+
+# Complyance paymentMeansCode enum. The mapper emits the UNCL4461 code.
+_GETS_PAYMENT_MEANS = {
+	"1": "INSTRUMENT_NOT_DEFINED",
+	"10": "IN_CASH",
+	"20": "CHEQUE",
+	"30": "CREDIT_TRANSFER",
+	"42": "CREDIT_TRANSFER",
+	"48": "CREDIT_CARD",
+	"49": "DIRECT_DEBIT",
+	"54": "CREDIT_CARD",
+	"55": "DEBIT_CARD",
+	"58": "CREDIT_TRANSFER",
+}
+
+
+def _legal_registration_scheme(raw: str | None) -> str:
+	return _LEGAL_REGISTRATION_SCHEMES.get((raw or "").strip(), "TL")
+
+
 def _party(party: dict[str, Any]) -> dict[str, Any]:
 	result: dict[str, Any] = {
 		"PartyName": {"Name": party["name"]},
@@ -143,10 +208,16 @@ def _party(party: dict[str, Any]) -> dict[str, Any]:
 
 	legal_id = party.get("legal_registration_identifier") or party.get("trade_license_number")
 	if legal_id:
-		result["PartyLegalEntity"]["CompanyID"] = {
-			"schemeID": party.get("legal_registration_identifier_type") or "OTH",
+		scheme = _legal_registration_scheme(party.get("legal_registration_identifier_type"))
+		company_id = {
+			"schemeID": scheme,
+			"schemeAgencyID": scheme,
 			"value": legal_id,
 		}
+		# BTAE-11 / BTAE-12. Required when the registration type is a trade licence.
+		if party.get("licence_authority"):
+			company_id["schemeAgencyName"] = party["licence_authority"]
+		result["PartyLegalEntity"]["CompanyID"] = company_id
 
 	if party.get("trn"):
 		result["PartyTaxScheme"] = {
@@ -159,19 +230,8 @@ def _party(party: dict[str, Any]) -> dict[str, Any]:
 		if group_tin:
 			result["PartyIdentification"] = [{"ID": {"schemeID": "AE:VAT-GROUP", "value": group_tin}}]
 
-	address = party.get("address")
-	if address:
-		postal: dict[str, Any] = {
-			"StreetName": address.get("line1"),
-			"CityName": address.get("city"),
-			"Country": {"IdentificationCode": address.get("country_code")},
-		}
-		if address.get("line2"):
-			postal["AdditionalStreetName"] = address["line2"]
-		if address.get("postal_zone"):
-			postal["PostalZone"] = address["postal_zone"]
-		if address.get("emirate_code"):
-			postal["CountrySubentityCode"] = address["emirate_code"]
+	postal = _postal_address(party.get("address"))
+	if postal:
 		result["PostalAddress"] = postal
 
 	contact = party.get("contact") or {}
@@ -191,7 +251,8 @@ def _party(party: dict[str, Any]) -> dict[str, Any]:
 
 def _payment_means(entry: dict[str, Any]) -> dict[str, Any]:
 	result: dict[str, Any] = {
-		"PaymentMeansCode": {"value": entry["code"], "name": entry["name"]},
+		# GETS enum. Complyance emits the matching UNCL4461 code (IBR-CL-16).
+		"PaymentMeansCode": {"value": _GETS_PAYMENT_MEANS.get(str(entry["code"]), entry["code"])},
 	}
 	account = entry.get("payee_financial_account")
 	if account:
@@ -208,12 +269,6 @@ def _payment_means(entry: dict[str, Any]) -> dict[str, Any]:
 
 
 def _invoice_line(line: dict[str, Any], currency: str) -> dict[str, Any]:
-	from taxmate.uae_e_invoicing.constants import (
-		ITEM_TYPE_BOTH,
-		ITEM_TYPE_GOODS,
-		ITEM_TYPE_SERVICE,
-	)
-
 	tax_category: dict[str, Any] = {
 		"ID": line["vat_category_code"],
 		"Percent": line["tax_rate"],
@@ -221,8 +276,6 @@ def _invoice_line(line: dict[str, Any], currency: str) -> dict[str, Any]:
 	}
 	if line.get("exemption_reason"):
 		tax_category["TaxExemptionReason"] = line["exemption_reason"]
-	if line.get("rcm_nature"):
-		tax_category["RCMNature"] = line["rcm_nature"]
 
 	result: dict[str, Any] = {
 		"ID": line["id"],
@@ -235,7 +288,10 @@ def _invoice_line(line: dict[str, Any], currency: str) -> dict[str, Any]:
 			"Description": line["description"],
 			"ClassifiedTaxCategory": tax_category,
 		},
-		"Price": {"PriceAmount": {"value": line["rate"], "currencyID": currency}},
+		"Price": {
+			"PriceAmount": {"value": line["rate"], "currencyID": currency},
+			"GrossPrice": {"value": line["rate"], "currencyID": currency},
+		},
 		"TaxTotal": {
 			"TaxAmount": {"value": line["tax_amount"], "currencyID": currency},
 			# BTAE-08: VAT line amount in AED
@@ -243,23 +299,27 @@ def _invoice_line(line: dict[str, Any], currency: str) -> dict[str, Any]:
 		},
 	}
 
-	classifications = []
-	item_type = line.get("uae_item_type")
-	if item_type in (ITEM_TYPE_GOODS, ITEM_TYPE_BOTH) and line.get("hs_code"):
-		classifications.append({"ItemClassificationCode": {"listID": "HS", "value": line["hs_code"]}})
-	if item_type in (ITEM_TYPE_SERVICE, ITEM_TYPE_BOTH) and line.get("sac_code"):
-		classifications.append({"ItemClassificationCode": {"listID": "SAC", "value": line["sac_code"]}})
-	# Fallback when type is blank but a code is present
-	if not classifications:
-		if line.get("hs_code"):
-			classifications.append({"ItemClassificationCode": {"listID": "HS", "value": line["hs_code"]}})
-		elif line.get("sac_code"):
-			classifications.append({"ItemClassificationCode": {"listID": "SAC", "value": line["sac_code"]}})
-
-	if len(classifications) == 1:
-		result["Item"]["CommodityClassification"] = classifications[0]
-	elif len(classifications) > 1:
-		result["Item"]["CommodityClassification"] = classifications
+	# IBR-184-AE / IBR-185-AE: commodity classification scheme must be HS.
+	# A service accounting code is a different identifier and must not use listID SAC.
+	if line.get("hs_code"):
+		# Repeating UBL element. Complyance maps the array path, and listID must be HS.
+		result["Item"]["CommodityClassification"] = [
+			{"ItemClassificationCode": {"listID": "HS", "value": line["hs_code"]}}
+		]
+	if line.get("sac_code"):
+		result["Item"]["ServiceAccountingCode"] = {"schemeID": "SAC", "value": line["sac_code"]}
+	if line.get("uae_item_type"):
+		result["Item"]["ItemType"] = line["uae_item_type"]
+	# FTA reverse-charge category. Omitted on ordinary tax invoices.
+	if line.get("rcm_nature"):
+		result["Item"]["RCMType"] = line["rcm_nature"]
+	if line.get("item_code"):
+		result["Item"]["SellersItemIdentification"] = {"ID": line["item_code"]}
+	# IBT-157. Scheme is an ISO 6523 ICD (0160 = GS1 GTIN). Never derived from the HS code.
+	if line.get("standard_item_id") and line.get("standard_item_scheme"):
+		result["Item"]["StandardItemIdentification"] = {
+			"ID": {"schemeID": line["standard_item_scheme"], "value": line["standard_item_id"]}
+		}
 
 	if line.get("discount_amount") and line.get("price_before_discount") is not None:
 		# PriceAmount must be the pre-discount unit price when AllowanceCharge is present
@@ -267,7 +327,11 @@ def _invoice_line(line: dict[str, Any], currency: str) -> dict[str, Any]:
 			"PriceAmount": {
 				"value": line["price_before_discount"],
 				"currencyID": currency,
-			}
+			},
+			"GrossPrice": {
+				"value": line["price_before_discount"],
+				"currencyID": currency,
+			},
 		}
 		result["AllowanceCharge"] = {
 			"ChargeIndicator": False,
@@ -291,8 +355,6 @@ def _tax_totals(data: dict[str, Any]) -> list[dict[str, Any]]:
 		}
 		if entry.get("exemption_reason"):
 			category["TaxExemptionReason"] = entry["exemption_reason"]
-		if entry.get("rcm_nature"):
-			category["RCMNature"] = entry["rcm_nature"]
 		subtotals.append(
 			{
 				"TaxableAmount": {"value": entry["taxable_amount"], "currencyID": currency},

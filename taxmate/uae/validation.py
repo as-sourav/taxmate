@@ -9,7 +9,8 @@ from frappe import _
 
 from taxmate.uae.constants import UAE_COUNTRY, UAE_EMIRATES, UAE_TRN_LENGTH
 
-_TRN_RE = re.compile(rf"^\d{{{UAE_TRN_LENGTH}}}$")
+# IBR-132-AE: 15 digits, starts with 1, ends with 03.
+_TRN_RE = re.compile(rf"^1\d{{{UAE_TRN_LENGTH - 3}}}03$")
 
 
 def get_taxmate_settings():
@@ -61,7 +62,7 @@ def validate_trn(trn: str | None, label: str = "Tax ID"):
 		return
 	if not is_valid_uae_trn(normalized):
 		frappe.throw(
-			_("{0} must be a {1}-digit UAE Tax Registration Number (TRN).").format(label, UAE_TRN_LENGTH),
+			_("{0} must be a 15-digit UAE TRN starting with 1 and ending with 03.").format(label),
 			title=_("Invalid TRN"),
 		)
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import unittest
 from unittest.mock import patch
 
@@ -16,6 +18,27 @@ class TestWebhookSignature(unittest.TestCase):
 		settings = frappe._dict(webhook_secret=None, asp_provider="Complyance", sandbox_mode=1)
 		with patch("frappe.get_cached_doc", return_value=settings):
 			self.assertFalse(_verify_signature(b"{}"))
+
+	def test_signature_reads_password_store_when_field_is_blank(self):
+		from taxmate.uae_e_invoicing.utils.webhook import _verify_signature
+
+		class Settings:
+			webhook_secret = ""
+
+			def get_password(self, fieldname, raise_exception=True):
+				self.fieldname = fieldname
+				return "sekrit"
+
+		settings = Settings()
+		raw = b"{}"
+		digest = hmac.new(b"sekrit", raw, hashlib.sha256).hexdigest()
+		request = frappe._dict(headers={"X-Webhook-Signature": digest})
+		with (
+			patch("frappe.get_cached_doc", return_value=settings),
+			patch("frappe.request", request),
+		):
+			self.assertTrue(_verify_signature(raw))
+		self.assertEqual(settings.fieldname, "webhook_secret")
 
 
 class TestWebhookEndpoint(FrappeTestCase):

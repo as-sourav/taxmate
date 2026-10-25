@@ -9,6 +9,7 @@
  */
 import type { ReactNode } from "react";
 import { t } from "../i18n/strings";
+import { confirmCancel } from "../lib/workflow";
 import DocHistory from "./DocHistory";
 
 export type DetailActionsProps = {
@@ -67,6 +68,9 @@ export default function DetailActions({
   doctype,
   name,
 }: DetailActionsProps) {
+  function run(action: () => void | Promise<unknown>) {
+    void Promise.resolve(action()).catch(() => undefined);
+  }
   return (
     <>
       {doctype && name ? <DocHistory doctype={doctype} name={name} /> : null}
@@ -76,23 +80,31 @@ export default function DetailActions({
         </button>
       )}
       {draft && canSubmit && onSubmit && (
-        <button type="button" className="btn" disabled={busy} onClick={onSubmit}>
+        <button type="button" className="btn" disabled={busy} onClick={() => run(onSubmit)}>
           {busy ? t("soc.saving") : t("inv.submit")}
         </button>
       )}
-      {draft && canWrite && onDelete && (
+      {draft && canWrite && canCancel && onDelete && (
         <button type="button" className="btn quiet" disabled={busy} onClick={onDelete}>
           {busy ? t("soc.saving") : t("inv.delete")}
         </button>
       )}
       {extra}
       {submitted && canCancel && onCancel && (
-        <button type="button" className="btn quiet" disabled={busy} onClick={onCancel}>
-          {t("inv.cancel")}
+        <button
+          type="button"
+          className="btn quiet"
+          disabled={busy}
+          onClick={() => {
+            if (!confirmCancel(name)) return;
+            run(onCancel);
+          }}
+        >
+          {busy ? t("soc.saving") : t("inv.cancel")}
         </button>
       )}
       {cancelled && canSubmit && onAmend && (
-        <button type="button" className="btn ghost" disabled={busy} onClick={onAmend}>
+        <button type="button" className="btn ghost" disabled={busy} onClick={() => run(onAmend)}>
           {t("inv.amend")}
         </button>
       )}

@@ -301,6 +301,9 @@ def get_catalog() -> dict[str, Any]:
 			{"name": "change_password", "method": "taxmate.api.users.change_password"},
 			{"name": "update_ui_preferences", "method": "taxmate.api.ui_prefs.update_ui_preferences"},
 			{"name": "get_session", "method": "taxmate.api.get_session"},
+			{"name": "list_inbox", "method": "taxmate.api.notifications.list_inbox"},
+			{"name": "mark_read", "method": "taxmate.api.notifications.mark_read"},
+			{"name": "mark_all_read", "method": "taxmate.api.notifications.mark_all_read"},
 			{"name": "get_catalog", "method": "taxmate.api.get_catalog"},
 			{"name": "owner_dashboard", "method": "taxmate.api.owner_dashboard.get_owner_dashboard"},
 			{

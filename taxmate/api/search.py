@@ -7,82 +7,16 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import quote
 
 import frappe
 from frappe import _
 from frappe.utils import cint, cstr
 
 from taxmate.api.resource import is_allowed_doctype, require_login
+from taxmate.api.spa_routes import SPA_DOC_ROUTES as _SPA_DOC_ROUTES
+from taxmate.api.spa_routes import doc_route as _doc_route
 from taxmate.search import GLOBAL_SEARCH_DOCTYPES
 from taxmate.utils.company import get_default_company, owning_company_field
-
-# Only doctypes the React app owns. No Desk fallback.
-_SPA_DOC_ROUTES: dict[str, str] = {
-	"Customer": "/customers/{name}",
-	"Supplier": "/suppliers/{name}",
-	"Sales Order": "/orders/{name}",
-	"Delivery Note": "/delivery-notes/{name}",
-	"Sales Invoice": "/invoices/{name}",
-	"Purchase Invoice": "/purchase-invoices/{name}",
-	"Purchase Order": "/purchase-orders/{name}",
-	"Purchase Receipt": "/purchase-receipts/{name}",
-	"Stock Entry": "/stock-entries/{name}",
-	"Stock Reconciliation": "/stock-reconciliations/{name}",
-	"Material Request": "/material-requests/{name}",
-	"Quotation": "/quotations/{name}",
-	"UAE Incoming Invoice": "/incoming-invoices/{name}",
-	"Journal Entry": "/journals/{name}",
-	"Account": "/accounts/{name}",
-	"Warehouse": "/warehouses/{name}",
-	"Sales Taxes and Charges Template": "/tax-templates/sales/{name}",
-	"Purchase Taxes and Charges Template": "/tax-templates/purchase/{name}",
-	"Payment Entry": "/payments/{name}",
-	"Item": "/catalogue/items/{name}",
-	"Item Group": "/catalogue/item-groups/{name}",
-	"Brand": "/catalogue/brands/{name}",
-	"UOM": "/catalogue/uoms/{name}",
-	"UAE VAT 201 Filing Log": "/vat-201/{name}",
-	"UAE CT Filing Log": "/ct-filings/{name}",
-	"UAE ESR Filing": "/esr/{name}",
-	"UAE UBO Register": "/ubo/{name}",
-	"UAE Late Filing Notice": "/late-filings/{name}",
-	"Bank Account": "/bank-accounts/{name}",
-	"Mode of Payment": "/modes-of-payment/{name}",
-	"Payment Terms Template": "/payment-terms-templates/{name}",
-	"Price List": "/price-lists/{name}",
-	"Serial No": "/serial-nos/{name}",
-	"Batch": "/batches/{name}",
-	"Landed Cost Voucher": "/landed-cost-vouchers/{name}",
-	"Pricing Rule": "/pricing-rules/{name}",
-	"Customer Group": "/customer-groups/{name}",
-	"Supplier Group": "/supplier-groups/{name}",
-	"Territory": "/territories/{name}",
-	# Phase 11-15 new screens
-	"Tax Category": "/tax-categories/{name}",
-	"Item Tax Template": "/item-tax-templates/{name}",
-	"Address": "/addresses/{name}",
-	"Contact": "/contacts/{name}",
-	"Fiscal Year": "/fiscal-years/{name}",
-	"Terms and Conditions": "/terms-and-conditions/{name}",
-	"Supplier Quotation": "/supplier-quotations/{name}",
-	"Lead": "/leads/{name}",
-	"UAE Related Party": "/uae-related-parties/{name}",
-	"UAE VAT Group": "/uae-vat-groups/{name}",
-	"UAE Bad Debt Relief": "/uae-bad-debt-relief/{name}",
-	"UAE Customs Declaration": "/uae-customs-declarations/{name}",
-	"UAE Capital Goods Adjustment": "/uae-capital-goods-adjustments/{name}",
-	"BOM": "/boms/{name}",
-	"Work Order": "/work-orders/{name}",
-	"Pick List": "/pick-lists/{name}",
-	"POS Invoice": "/pos-invoices/{name}",
-	"POS Profile": "/pos-profiles/{name}",
-	"Loyalty Program": "/loyalty-programs/{name}",
-	"Loyalty Point Entry": "/loyalty-point-entries/{name}",
-	"Currency Exchange": "/currency-exchanges/{name}/edit",
-	"Asset Category": "/asset-categories/{name}/edit",
-	"Asset": "/assets/{name}",
-}
 
 _SPA_LIST_ROUTES: dict[str, str] = {
 	"Customer": "/customers",
@@ -185,7 +119,7 @@ _NAV_PAGES: tuple[dict[str, str], ...] = (
 		"route": "/incoming-invoices",
 		"keywords": "incoming einvoice peppol received supplier bill asp",
 	},
-	{"label": "Invoices", "route": "/invoices", "keywords": "sales invoice bill"},
+	{"label": "Sales Invoices", "route": "/invoices", "keywords": "sales invoice bill invoices"},
 	{"label": "Payments", "route": "/payments", "keywords": "payment receipt"},
 	{"label": "Receivables", "route": "/receivables", "keywords": "ar outstanding"},
 	{"label": "Payables", "route": "/payables", "keywords": "ap aged payable supplier outstanding"},
@@ -396,13 +330,6 @@ def _in_active_company(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
 		or hit.get("doctype") not in by_doctype
 		or (hit["doctype"], hit["name"]) in keep
 	]
-
-
-def _doc_route(doctype: str, name: str) -> str | None:
-	template = _SPA_DOC_ROUTES.get(doctype)
-	if not template:
-		return None
-	return template.format(name=quote(name, safe=""))
 
 
 def _list_route(doctype: str) -> str | None:

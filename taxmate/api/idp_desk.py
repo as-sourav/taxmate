@@ -269,9 +269,37 @@ def _context(doctype: str, language: str):
 	)
 
 
+def _plain_detail(detail: str) -> str | None:
+	"""Drop Desk links and HTML from an ERPNext validation message."""
+	import re
+
+	text = re.sub(r"<br\s*/?>", " ", detail or "", flags=re.IGNORECASE)
+	text = re.sub(r"<[^>]+>", "", text)
+	text = re.sub(r"https?://\S+", "", text)
+	text = re.sub(r"\s+", " ", text).strip()
+	if re.search(r"entered multiple times", text, re.IGNORECASE):
+		return "The same item is on more than one line. Check the item and the unit on each row."
+	return text[:400] or None
+
+
 def _tool_error(result) -> dict:
-	detail = getattr(result, "error", None) or ""
-	return {"ok": False, "error_key": "idp.readFailed", "detail": str(detail)[:400] or None}
+	"""A failed save is not a failed read.
+
+	create_document turns an empty PermissionError into the literal
+	"permission denied". The file was already read. Caller: _save_create.
+	"""
+	detail = _plain_detail(str(getattr(result, "error", None) or ""))
+	code = str(getattr(result, "error_code", None) or "")
+	if code == "PERMISSION_DENIED" or (detail or "").lower() == "permission denied":
+		return {
+			"ok": False,
+			"error_key": "idp.propose.failed",
+			"detail": (
+				"This draft was not saved. A supplier, customer, or item on it "
+				"belongs to another company. Save the draft again."
+			),
+		}
+	return {"ok": False, "error_key": "idp.propose.failed", "detail": detail}
 
 
 def _open_draft(doctype: str, name: str) -> dict | None:
@@ -387,12 +415,27 @@ def get_scan(scan_id: str, target_doctype: str | None = None) -> dict:
 	payload = scan_payload(doc)
 	if doc.status in scan_mod.REVIEW_READY:
 		planned = _plan("create", target_doctype or doc.target_doctype, doc.file_url, None)
-		if planned.get("ok"):
-			review = _review_from_scan(scan_id, planned, doc.file_url)
-			payload["review"] = review
+		if not planned.get("ok"):
+			# A finished read with no review must not stay "still reading" on the client.
+			payload["ok"] = False
+			payload["error_key"] = planned.get("error_key") or "idp.readFailed"
+			detail = planned.get("detail") or planned.get("message")
+			if detail:
+				payload["detail"] = str(detail)[:400]
+		else:
+			try:
+				payload["review"] = _review_from_scan(scan_id, planned, doc.file_url)
+			except Exception:
+				frappe.log_error(title="TaxMate scan review build failed")
+				payload["ok"] = False
+				payload["error_key"] = "idp.readFailed"
+				payload["detail"] = "The file was read, but the draft could not be prepared. Start over."
 	elif doc.status == scan_mod.FAILED:
 		payload["ok"] = False
-		payload["error_key"] = doc.error_key or "idp.readFailed"
+		key = doc.error_key or "idp.readFailed"
+		if key == "worker_lost":
+			key = "idp.readFailed"
+		payload["error_key"] = key
 		# Surface worker exception text so the SPA can show more than the generic key.
 		detail = (getattr(doc, "error_message", None) or "").strip()
 		if detail:
@@ -582,6 +625,8 @@ def _run_create(planned: dict, file_url: str) -> dict:
 			file_sha256_hex=digest,
 			status=scan_mod.EXTRACTING,
 		)
+	except frappe.PermissionError:
+		return {"ok": False, "error_key": "idp.denied"}
 	except Exception:
 		frappe.log_error(title="TaxMate IDP persist scan failed", message=frappe.get_traceback())
 		return {"ok": False, "error_key": "idp.readFailed", "detail": "Could not create Scan"}
@@ -635,13 +680,16 @@ def _save_create(
 ) -> dict:
 	from taxmate.idp import scan as scan_mod
 	from taxmate.idp.masters import (
+		align_scanned_items,
 		apply_created_links,
 		build_proposals,
 		create_confirmed,
 		merge_proposal_values,
+		party_proposals_for_company,
 		proposals_complete,
 		release_address_links,
 		release_currency_company,
+		scope_extract_to_company,
 		split_missing,
 	)
 
@@ -666,6 +714,8 @@ def _save_create(
 	file_url = file_url or scan_doc.file_url or ""
 	release_currency_company(extracted)
 	release_address_links(extracted)
+	# Another company's supplier/item must not ride into this draft.
+	scope_extract_to_company(extracted)
 	_creatable, blocked = split_missing((extracted.get("validation") or {}).get("missing_masters"))
 	if blocked:
 		named = []
@@ -698,6 +748,20 @@ def _save_create(
 		apply_created_links(extracted, made.get("created") or {})
 		_refresh_validation(extracted)
 		release_address_links(extracted)
+	align_scanned_items(extracted)
+	scope_extract_to_company(extracted)
+	extras = party_proposals_for_company(extracted)
+	if extras:
+		made = create_confirmed(extras)
+		if not made.get("ok"):
+			return {
+				"ok": False,
+				"error_key": made.get("error_key") or "idp.propose.failed",
+				"detail": made.get("detail"),
+			}
+		apply_created_links(extracted, made.get("created") or {})
+		_refresh_validation(extracted)
+		release_address_links(extracted)
 	# Re-read leftovers only block when the clerk did not send complete cards.
 	# After create+stamp, draft_instructions keeps the confirmed cards so
 	# ERPNext schema noise cannot soft-fail as idp.invalid.
@@ -712,7 +776,7 @@ def _save_create(
 		instructions["header"],
 		instructions.get("items") or [],
 		_fills(fills),
-		_draft_defaults(instructions.get("items") or []),
+		_draft_defaults(instructions.get("items") or [], instructions.get("doctype") or ""),
 	)
 	instructions["header"] = header
 	instructions["items"] = items
@@ -754,7 +818,7 @@ def _save_create(
 		submitted = submit_doc({"doctype": instructions["doctype"], "name": name})
 	except Exception as exc:
 		payload["error_key"] = "idp.submitFailed"
-		payload["detail"] = str(exc)
+		payload["detail"] = _plain_detail(str(exc))
 		return payload
 	payload["step"] = "submitted"
 	payload["docstatus"] = submitted.get("docstatus") if isinstance(submitted, dict) else payload["docstatus"]
@@ -835,7 +899,7 @@ def _prefill_writes(review: dict) -> None:
 			row["value"] = defaults["vat_emirate"]
 
 
-def _draft_defaults(items: list) -> dict:
+def _draft_defaults(items: list, doctype: str = "") -> dict:
 	from taxmate.utils.company import can_use_company
 
 	company = get_default_company()
@@ -852,6 +916,7 @@ def _draft_defaults(items: list) -> dict:
 		code = row.get("item_code")
 		if code and code not in uoms:
 			uoms[code] = frappe.db.get_value("Item", code, "stock_uom") or ""
+	purchase = doctype.startswith("Purchase") or doctype == "Supplier Quotation"
 	return {
 		"company": company or "",
 		"cost_center": frappe.db.get_value("Company", company, "cost_center") if company else "",
@@ -859,7 +924,13 @@ def _draft_defaults(items: list) -> dict:
 		"income_account": frappe.db.get_value("Company", company, "default_income_account")
 		if company
 		else "",
+		"expense_account": (
+			frappe.db.get_value("Company", company, "default_expense_account") if company and purchase else ""
+		),
 		"selling_price_list": frappe.db.get_single_value("Selling Settings", "selling_price_list") or "",
+		"buying_price_list": (
+			frappe.db.get_single_value("Buying Settings", "buying_price_list") or "" if purchase else ""
+		),
 		"vat_emirate": _company_emirate(company or ""),
 		"item_uom": uoms,
 	}
