@@ -27,27 +27,25 @@ export async function takePhoto(): Promise<CameraPick> {
       return { ok: false, error_key: "idp.cameraDenied" };
     }
     const photo = await Camera.getPhoto({
-      quality: 85,
-      resultType: CameraResultType.Uri,
-      source: CameraSource.Camera,
-      correctOrientation: true,
-    });
-    const url = photo.webPath || photo.path;
-    if (!url) return { ok: false, error_key: "idp.emptyFile" };
-    const res = await fetch(url);
-    const blob = await res.blob();
-    const file = new File([blob], `scan-${Date.now()}.jpg`, {
-      type: blob.type || "image/jpeg",
-    });
-    return { ok: true, file };
-  } catch (err) {
-    const msg = String(err || "").toLowerCase();
-    if (msg.includes("cancel") || msg.includes("user")) {
-      return { ok: false, error_key: "idp.emptyFile" };
-    }
-    if (msg.includes("permission") || msg.includes("denied")) {
-      return { ok: false, error_key: "idp.cameraDenied" };
-    }
-    return { ok: false, error_key: "idp.readFailed" };
+  quality: 85,
+  resultType: CameraResultType.DataUrl,
+  source: CameraSource.Camera,
+  correctOrientation: true,
+});
+if (!photo.dataUrl) return { ok: false, error_key: "idp.emptyFile" };
+const blob = await (await fetch(photo.dataUrl)).blob();
+const file = new File([blob], `scan-${Date.now()}.jpg`, { type: blob.type || "image/jpeg" });
+return { ok: true, file };
+} catch (err) {
+  const raw = String((err as any)?.message ?? err);
+  console.error("takePhoto failed:", err);
+  const msg = raw.toLowerCase();
+  if (msg.includes("denied") || msg.includes("permission")) {
+    return { ok: false, error_key: "idp.cameraDenied" };
   }
+  if (msg.includes("cancel")) {
+    return { ok: false, error_key: "idp.emptyFile" };
+  }
+  return { ok: false, error_key: "idp.readFailed", detail: raw } as any;
+}
 }
