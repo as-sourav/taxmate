@@ -13,6 +13,7 @@ import { confirmCancel } from "../../lib/workflow";
 import { date, money } from "../../lib/format";
 import { t } from "../../i18n/strings";
 import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow, SumRow } from "../../components/ui";
+import { PrintLangButtons } from "../../components/PrintLangButtons";
 import DocHistory from "../../components/DocHistory";
 import { FormLayout } from "../../components/form";
 import LineItems, { type LineField } from "../../components/LineItems";
@@ -98,6 +99,7 @@ export default function Vat201Detail() {
         actions={
           <>
             <DocHistory doctype={DT.vat201} name={name} />
+            <PrintLangButtons doctype={DT.vat201} name={name} format="UAE VAT 201 Worksheet" />
             {draft && (
               <button type="button" className="btn ghost" disabled={generate.loading}
                 onClick={() => void regenerate()}>
