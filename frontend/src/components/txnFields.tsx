@@ -196,12 +196,18 @@ export function PaymentScheduleTable({ rows }: { rows: ScheduleRow[] }) {
   );
 }
 
-/** "Order discount, 10% before VAT" — the basis is part of the label, not a color. */
+/**
+ * The row is the order discount, not a product discount. "Before VAT" is
+ * Desk's Net Total; "after VAT" is Grand Total. The form's select uses the
+ * Desk names Net total and Grand total. This label does not, because those
+ * words are already the net and grand rows underneath.
+ * Callers: TxnTotals below. Purchase, sales, and receipt screens pass the basis.
+ */
 export function orderDiscountLabel(percent?: number, basis?: string): string {
   const where = basis === "Grand Total" ? t("txn.afterVat") : t("txn.beforeVat");
   const pct = Number(percent) || 0;
-  const pctBit = pct > 0 ? `${pct}% ` : "";
-  return `${t("txn.orderDiscount")}, ${pctBit}${where}`;
+  const pctBit = pct > 0 ? `, ${pct}%` : "";
+  return `${t("txn.orderDiscount")}${pctBit} · ${where}`;
 }
 
 export function formatLineDiscount(line: { discount_percentage?: number; discount_amount?: number }): string {
@@ -258,8 +264,8 @@ export function OrderDiscountFields({
           disabled={disabled}
           onChange={(e) => onBasis(e.target.value === "Grand Total" ? "Grand Total" : "Net Total")}
         >
-          <option value="Net Total">{t("txn.discountBeforeVat")}</option>
-          <option value="Grand Total">{t("txn.discountAfterVat")}</option>
+          <option value="Net Total">{t("sod.net")}</option>
+          <option value="Grand Total">{t("sod.grand")}</option>
         </select>
       </Field>
     </>
@@ -327,7 +333,7 @@ export function TxnTotals({
   children?: ReactNode;
 }) {
   const product = Number(productDiscount) || 0;
-  const order = Number(orderDiscount) || 0;
+  const order = Math.abs(Number(orderDiscount) || 0);
   const showProduct = product > 0.004;
   const showOrder = order > 0.004;
   const items = Number(itemsTotal ?? net) || 0;
@@ -336,6 +342,8 @@ export function TxnTotals({
   // lowers the item net by only the pre-VAT share and recomputes VAT, so
   // discount_amount is larger than items − net. The row uses the share that
   // sits between items and net; the note keeps the full bill reduction.
+  // Only the stored discount_amount opens this row. A gap between total and
+  // net is also how included tax shows up, so it is not treated as a discount.
   const itemShare = itemsTotal == null ? order : items - netAmount;
   const onGrand = discountOn === "Grand Total";
   const splitGrand =
