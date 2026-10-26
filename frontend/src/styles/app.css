@@ -38,7 +38,7 @@ svg{display:block}
    .rail (`{!mobile && …}`), so the old horizontal-scroller block was dead code
    that would have fought the fixed tab bar in styles/shell-mobile.css. */
 .rbrand{display:flex; align-items:center; gap:11px; padding:4px 8px 18px; font-weight:700; font-size:17px; letter-spacing:-.025em; white-space:nowrap; color:var(--text)}
-.rbrand .mark{width:32px; height:32px; border-radius:10px; background:var(--brand); color:#fff; display:grid; place-items:center; font-size:15px; font-weight:700; flex:none}
+.rbrand svg{width:32px; height:32px; border-radius:10px; flex:none}
 .app.collapsed .rbrand span:last-child{display:none}
 .app.collapsed .rbrand{justify-content:center; padding-inline:0}
 

@@ -304,16 +304,10 @@
   /* No auto margin: .tright already carries margin-inline-start:auto, and a
      second auto here would split the free space instead of using it. */
 }
-.mnav-brand .mark {
+.mnav-brand svg {
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  background: var(--brand);
-  color: var(--brand-ink, #fff);
-  display: grid;
-  place-items: center;
-  font-size: 13px;
-  font-weight: 700;
   flex: none;
 }
 /* The mark alone, below 900px. With the wordmark in, the top bar needs three
@@ -369,7 +363,7 @@
     border-block-end-color: color-mix(in srgb, var(--border) 70%, transparent);
     isolation: isolate;
   }
-  .app.has-mnav .mnav-brand .mark {
+  .app.has-mnav .mnav-brand svg {
     border-radius: 9px;
   }
   .app.has-mnav .tsearch { flex: 1 1 100%; max-width: none; min-width: 0; order: 10; }
