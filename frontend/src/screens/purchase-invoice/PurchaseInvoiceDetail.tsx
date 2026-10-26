@@ -2,7 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
-import { printDocUrl } from "../../lib/printDoc";
+import { PrintLangButtons } from "../../components/PrintLangButtons";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canCancelSales, canSubmitSales, canWrite, eInvoiceLocked } from "../../lib/roles";
@@ -15,7 +15,6 @@ import { FormLayout } from "../../components/form";
 import DetailActions from "../../components/DetailActions";
 import LineItems, { type LineField } from "../../components/LineItems";
 import { useDeleteDraftAction } from "../../lib/useDraftDelete";
-import { isNative } from "../../mobile/platform";
 
 type Line = {
   name?: string; item_code?: string; item_name?: string; qty?: number; uom?: string;
@@ -35,10 +34,6 @@ type Doc = {
   docstatus?: 0 | 1 | 2; status?: string; uae_e_invoice_status?: string;
   items?: Line[];
 };
-
-function printUrl(name: string): string {
-  return printDocUrl(DT.purchaseInvoice, name, "UAE Bilingual Purchase Invoice");
-}
 
 function piPill(status?: string): string {
   if (status === "Draft") return "p-draft";
@@ -152,12 +147,7 @@ export default function PurchaseInvoiceDetail() {
                     {t("pi.debit")}
                   </button>
                 )}
-                {/* Print view needs a cookie session; the app gets PDF sharing in round 3. */}
-                {!isNative() && (
-                <button type="button" className="btn ghost" onClick={() => window.open(printUrl(name), "_blank", "noopener")}>
-                  {t("inv.print")}
-                </button>
-                )}
+                <PrintLangButtons doctype={DT.purchaseInvoice} name={name} format="UAE Bilingual Purchase Invoice" />
               </>
             }
           />

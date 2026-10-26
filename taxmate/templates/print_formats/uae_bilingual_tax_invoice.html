@@ -1,6 +1,6 @@
-{# UAE bilingual Tax Invoice / فاتورة ضريبية — Sales Invoice and Purchase Invoice.
-   Labels are written in both languages. Do not pass them through _():
-   Arabic mode would replace the English half and the line would read Arabic / Arabic. #}
+{# UAE Tax Invoice — Sales Invoice and Purchase Invoice, including a credit note.
+   English print keeps both languages. Arabic print (tm_is_arabic) uses Arabic
+   headings only. Do not pass a bilingual pair through _(). #}
 {% from "templates/print_formats/uae_money.html" import uae_money %}
 {% include "templates/print_formats/uae_print_head.html" %}
 {% set is_return = doc.is_return %}
@@ -21,8 +21,36 @@
   {% set buyer_addr = doc.address_display %}
 {% endif %}
 {% set is_simplified = (not buyer_trn) and (base_total|abs <= 10000) %}
+{% set is_ar = tm_is_arabic() %}
+{% if is_ar %}
+  {% if doc.doctype == "Purchase Invoice" %}
+    {% set seller_name = tm_name(seller_name, doc.get("supplier_name_in_arabic")) %}
+    {% set seller_addr = tm_name(seller_addr, doc.get("address_in_arabic")) %}
+  {% else %}
+    {% set buyer_name = tm_name(buyer_name, doc.get("customer_name_in_arabic")) %}
+    {% set buyer_addr = tm_name(buyer_addr, doc.get("address_in_arabic")) %}
+  {% endif %}
+{% endif %}
 {% set title_en = "Credit Note" if is_return else ("Simplified Tax Invoice" if is_simplified else "Tax Invoice") %}
 {% set title_ar = "إشعار دائن" if is_return else ("فاتورة ضريبية مبسطة" if is_simplified else "فاتورة ضريبية") %}
+{% if is_return %}
+  {% set legal_en = "This is a credit note issued in accordance with Federal Decree-Law No. 8 of 2017 on Value Added Tax. Keep this document for your records." %}
+  {% set legal_ar = "هذا إشعار دائن صادر وفقاً للمرسوم بقانون اتحادي رقم (8) لسنة 2017 في شأن ضريبة القيمة المضافة. يُرجى الاحتفاظ بهذه الوثيقة." %}
+{% elif is_simplified %}
+  {% set legal_en = "This is a simplified tax invoice issued in accordance with Federal Decree-Law No. 8 of 2017 on Value Added Tax. Keep this document for your records." %}
+  {% set legal_ar = "هذه فاتورة ضريبية مبسطة صادرة وفقاً للمرسوم بقانون اتحادي رقم (8) لسنة 2017 في شأن ضريبة القيمة المضافة. يُرجى الاحتفاظ بهذه الوثيقة." %}
+{% else %}
+  {% set legal_en = "This is a tax invoice issued in accordance with Federal Decree-Law No. 8 of 2017 on Value Added Tax. Keep this document for your records." %}
+  {% set legal_ar = "هذه فاتورة ضريبية صادرة وفقاً للمرسوم بقانون اتحادي رقم (8) لسنة 2017 في شأن ضريبة القيمة المضافة. يُرجى الاحتفاظ بهذه الوثيقة." %}
+{% endif %}
+{% set emirate_ar = {
+  "Abu Dhabi": "أبوظبي", "Ajman": "عجمان", "Dubai": "دبي", "Fujairah": "الفجيرة",
+  "Ras Al Khaimah": "رأس الخيمة", "Sharjah": "الشارقة", "Umm Al Quwain": "أم القيوين"
+} %}
+{% set vat_cat_ar = {
+  "Standard": "النسبة الأساسية", "Standard Rated": "النسبة الأساسية",
+  "Zero Rated": "نسبة صفر", "Exempt": "معفى", "Reverse Charge": "الاحتساب العكسي"
+} %}
 {% set einv_log = None %}
 {% if doc.uae_e_invoice_log %}
   {% set einv_log = frappe.db.get_value("UAE E-Invoice Log", doc.uae_e_invoice_log, ["uuid", "status"], as_dict=True) %}
@@ -42,7 +70,7 @@
 .tm-inv table.items th, .tm-inv table.items td { border: 1px solid #ccc; padding: 5px 6px; }
 .tm-inv table.items th { background: #0b3d2e; color: #fff; font-size: 9pt; }
 .tm-inv .num { text-align: right; white-space: nowrap; }
-.tm-inv .tm-amt { direction: ltr; unicode-bidi: isolate; }
+.tm-inv .tm-amt, .tm-inv .tm-ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
 .tm-inv .totals { width: 46%; margin-left: auto; margin-top: 10px; }
 .tm-inv .totals td { padding: 4px 8px; border: 1px solid #ddd; }
 .tm-inv .totals tr.grand td { font-weight: 700; background: #f3f7f5; }
@@ -52,24 +80,28 @@
 .tm-inv .qr { margin-top: 12px; padding: 8px; border: 1px dashed #888; font-size: 8.5pt; }
 .tm-inv .status { margin-top: 8px; font-size: 9pt; }
 </style>
-<div class="tm-inv">
+<div class="tm-inv"{% if is_ar %} dir="rtl"{% endif %}>
   <table class="hdr">
     <tr>
       <td class="titles">
+        {% if is_ar %}
+        <h1>{{ title_ar }}</h1>
+        {% else %}
         <h1>{{ title_en }}</h1>
         <div class="ar">{{ title_ar }}</div>
+        {% endif %}
       </td>
       <td class="meta">
-        <div><strong>Invoice No. / رقم الفاتورة:</strong> {{ doc.name }}</div>
-        <div><strong>Date / التاريخ:</strong> {{ doc.get_formatted("posting_date") }}</div>
+        <div><strong>{% if is_ar %}رقم الفاتورة{% else %}Invoice No. / رقم الفاتورة{% endif %}:</strong> <span class="tm-ltr">{{ doc.name }}</span></div>
+        <div><strong>{% if is_ar %}التاريخ{% else %}Date / التاريخ{% endif %}:</strong> <span class="tm-ltr">{{ doc.get_formatted("posting_date") }}</span></div>
         {% if doc.due_date and not is_return %}
-        <div><strong>Due Date / تاريخ الاستحقاق:</strong> {{ doc.get_formatted("due_date") }}</div>
+        <div><strong>{% if is_ar %}تاريخ الاستحقاق{% else %}Due Date / تاريخ الاستحقاق{% endif %}:</strong> <span class="tm-ltr">{{ doc.get_formatted("due_date") }}</span></div>
         {% endif %}
         {% if doc.vat_emirate %}
-        <div><strong>Place of Supply / مكان التوريد:</strong> {{ doc.vat_emirate }}</div>
+        <div><strong>{% if is_ar %}مكان التوريد{% else %}Place of Supply / مكان التوريد{% endif %}:</strong> {{ emirate_ar.get(doc.vat_emirate) if is_ar and emirate_ar.get(doc.vat_emirate) else doc.vat_emirate }}</div>
         {% endif %}
         {% if is_return and (doc.return_against or doc.uae_return_against_external) %}
-        <div><strong>Original Invoice / الفاتورة الأصلية:</strong> {{ doc.return_against or doc.uae_return_against_external }}</div>
+        <div><strong>{% if is_ar %}الفاتورة الأصلية{% else %}Original Invoice / الفاتورة الأصلية{% endif %}:</strong> <span class="tm-ltr">{{ doc.return_against or doc.uae_return_against_external }}</span></div>
         {% endif %}
       </td>
     </tr>
@@ -78,16 +110,16 @@
   <table class="parties">
     <tr>
       <td>
-        <h3>Supplier / المورد</h3>
+        <h3>{% if is_ar %}المورد{% else %}Supplier / المورد{% endif %}</h3>
         <div>{{ seller_name }}</div>
         {% if seller_addr %}<div>{{ seller_addr }}</div>{% endif %}
-        {% if seller_trn %}<div><strong>TRN / الرقم الضريبي:</strong> {{ seller_trn }}</div>{% endif %}
+        {% if seller_trn %}<div><strong>{% if is_ar %}الرقم الضريبي{% else %}TRN / الرقم الضريبي{% endif %}:</strong> <span class="tm-ltr">{{ seller_trn }}</span></div>{% endif %}
       </td>
       <td>
-        <h3>Customer / العميل</h3>
+        <h3>{% if is_ar %}العميل{% else %}Customer / العميل{% endif %}</h3>
         <div>{{ buyer_name }}</div>
         {% if buyer_addr %}<div>{{ buyer_addr }}</div>{% endif %}
-        {% if buyer_trn %}<div><strong>TRN / الرقم الضريبي:</strong> {{ buyer_trn }}</div>{% endif %}
+        {% if buyer_trn %}<div><strong>{% if is_ar %}الرقم الضريبي{% else %}TRN / الرقم الضريبي{% endif %}:</strong> <span class="tm-ltr">{{ buyer_trn }}</span></div>{% endif %}
       </td>
     </tr>
   </table>
@@ -96,12 +128,12 @@
     <thead>
       <tr>
         <th>#</th>
-        <th>Description / الوصف</th>
-        <th class="num">Qty / الكمية</th>
-        <th class="num">Rate / السعر</th>
-        <th class="num">Net / الصافي</th>
-        <th class="num">VAT % / نسبة الضريبة</th>
-        <th class="num">VAT / الضريبة</th>
+        <th>{% if is_ar %}الوصف{% else %}Description / الوصف{% endif %}</th>
+        <th class="num">{% if is_ar %}الكمية{% else %}Qty / الكمية{% endif %}</th>
+        <th class="num">{% if is_ar %}السعر{% else %}Rate / السعر{% endif %}</th>
+        <th class="num">{% if is_ar %}الصافي{% else %}Net / الصافي{% endif %}</th>
+        <th class="num">{% if is_ar %}نسبة الضريبة{% else %}VAT % / نسبة الضريبة{% endif %}</th>
+        <th class="num">{% if is_ar %}الضريبة{% else %}VAT / الضريبة{% endif %}</th>
       </tr>
     </thead>
     <tbody>
@@ -109,17 +141,20 @@
       {% set item_net = item.net_amount or 0 %}
       {% set item_vat = item.tax_amount or 0 %}
       {% set item_rate = item.tax_rate if item.tax_rate is not none else (item_vat / item_net * 100 if item_net else 0) %}
+      {% set item_text = tm_line(item.item_name, item.description, item.get("item_name_in_arabic") or item.get("description_in_arabic")) %}
+      {% set vat_cat = item.get("uae_vat_category") or item.get("tax_category") %}
       <tr>
-        <td>{{ item.idx }}</td>
+        <td><span class="tm-ltr">{{ item.idx }}</span></td>
         <td>
-          {{ item.item_name or item.description }}
-          {% if item.hs_code %}<div style="font-size:8pt;color:#555">HS: {{ item.hs_code }}</div>{% endif %}
-          {% if item.sac_code %}<div style="font-size:8pt;color:#555">SAC: {{ item.sac_code }}</div>{% endif %}
+          {{ item_text }}
+          {% if vat_cat %}<div style="font-size:8pt;color:#555">{{ vat_cat_ar.get(vat_cat) if is_ar and vat_cat_ar.get(vat_cat) else vat_cat }}</div>{% endif %}
+          {% if item.hs_code %}<div style="font-size:8pt;color:#555">{% if is_ar %}الرمز المنسق{% else %}HS / الرمز المنسق{% endif %}: <span class="tm-ltr">{{ item.hs_code }}</span></div>{% endif %}
+          {% if item.sac_code %}<div style="font-size:8pt;color:#555">{% if is_ar %}رمز الخدمة{% else %}SAC / رمز الخدمة{% endif %}: <span class="tm-ltr">{{ item.sac_code }}</span></div>{% endif %}
         </td>
-        <td class="num">{{ frappe.format(item.qty, {"fieldtype": "Float"}) }}</td>
+        <td class="num"><span class="tm-ltr">{{ frappe.format(item.qty, {"fieldtype": "Float"}) }}</span></td>
         <td class="num">{{ uae_money(item.rate, doc.currency) }}</td>
         <td class="num">{{ uae_money(item_net, doc.currency) }}</td>
-        <td class="num">{{ frappe.format(item_rate, {"fieldtype": "Percent"}) }}</td>
+        <td class="num"><span class="tm-ltr">{{ frappe.format(item_rate, {"fieldtype": "Percent"}) }}</span></td>
         <td class="num">{{ uae_money(item_vat, doc.currency) }}</td>
       </tr>
       {% endfor %}
@@ -130,16 +165,16 @@
   <table class="items" style="margin-top:12px;width:60%;margin-left:auto;">
     <thead>
       <tr>
-        <th>Tax Summary / ملخص الضريبة</th>
-        <th class="num">Rate / السعر</th>
-        <th class="num">Amount / المبلغ</th>
+        <th>{% if is_ar %}ملخص الضريبة{% else %}Tax Summary / ملخص الضريبة{% endif %}</th>
+        <th class="num">{% if is_ar %}السعر{% else %}Rate / السعر{% endif %}</th>
+        <th class="num">{% if is_ar %}المبلغ{% else %}Amount / المبلغ{% endif %}</th>
       </tr>
     </thead>
     <tbody>
       {% for tax in doc.taxes %}
       <tr>
         <td>{{ tax.description }}</td>
-        <td class="num">{% if tax.rate %}{{ frappe.format(tax.rate, {"fieldtype": "Percent"}) }}{% endif %}</td>
+        <td class="num">{% if tax.rate %}<span class="tm-ltr">{{ frappe.format(tax.rate, {"fieldtype": "Percent"}) }}</span>{% endif %}</td>
         <td class="num">{{ uae_money(tax.tax_amount, doc.currency) }}</td>
       </tr>
       {% endfor %}
@@ -149,27 +184,29 @@
 
   <table class="totals">
     <tr>
-      <td>Net Total / الإجمالي قبل الضريبة</td>
+      <td>{% if is_ar %}الإجمالي قبل الضريبة{% else %}Net Total / الإجمالي قبل الضريبة{% endif %}</td>
       <td class="num">{{ uae_money(doc.net_total, doc.currency) }}</td>
     </tr>
     <tr>
-      <td>VAT / ضريبة القيمة المضافة</td>
+      <td>{% if is_ar %}ضريبة القيمة المضافة{% else %}VAT / ضريبة القيمة المضافة{% endif %}</td>
       <td class="num">{{ uae_money(doc.total_taxes_and_charges, doc.currency) }}</td>
     </tr>
     <tr class="grand">
-      <td>Grand Total / الإجمالي شامل الضريبة</td>
+      <td>{% if is_ar %}الإجمالي شامل الضريبة{% else %}Grand Total / الإجمالي شامل الضريبة{% endif %}</td>
       <td class="num">{{ uae_money(doc.grand_total, doc.currency) }}</td>
     </tr>
   </table>
 
   {% if doc.uae_credit_note_reason %}
-  <p><strong>Credit Note Reason / سبب الإشعار الدائن:</strong> {{ doc.uae_credit_note_reason }}</p>
+  <p><strong>{% if is_ar %}سبب الإشعار الدائن{% else %}Credit Note Reason / سبب الإشعار الدائن{% endif %}:</strong> {{ tm_reason(doc.uae_credit_note_reason) }}</p>
   {% endif %}
 
   <div class="qr">
-    <strong>QR / رمز الاستجابة:</strong>
+    <strong>{% if is_ar %}رمز الاستجابة{% else %}QR / رمز الاستجابة{% endif %}:</strong>
     {% if einv_log and einv_log.uuid %}
-      UUID {{ einv_log.uuid }} · {{ einv_log.status }}
+      {% if is_ar %}المعرف{% else %}UUID{% endif %} <span class="tm-ltr">{{ einv_log.uuid }}</span> · {{ tm_status(einv_log.status) }}
+    {% elif is_ar %}
+      في انتظار توقيع مزود الخدمة
     {% else %}
       Pending ASP signature / في انتظار توقيع مزود الخدمة
     {% endif %}
@@ -177,24 +214,20 @@
 
   <div class="status">
     {% if doc.uae_e_invoice_status %}
-    <strong>E-Invoice Status / حالة الفاتورة الإلكترونية:</strong> {{ doc.uae_e_invoice_status }}
+    <strong>{% if is_ar %}حالة الفاتورة الإلكترونية{% else %}E-Invoice Status / حالة الفاتورة الإلكترونية{% endif %}:</strong> {{ tm_status(doc.uae_e_invoice_status) }}
     {% endif %}
     {% if doc.currency and doc.currency != "AED" %}
-    &nbsp;·&nbsp; Currency / العملة: {{ doc.currency }}
-    {% if doc.conversion_rate %} (Rate / السعر {{ doc.conversion_rate }}){% endif %}
+    &nbsp;·&nbsp; {% if is_ar %}العملة{% else %}Currency / العملة{% endif %}: <span class="tm-ltr">{{ doc.currency }}</span>
+    {% if doc.conversion_rate %} ({% if is_ar %}السعر{% else %}Rate / السعر{% endif %} <span class="tm-ltr">{{ doc.conversion_rate }}</span>){% endif %}
     {% endif %}
   </div>
 
   <table class="legal">
     <tr>
-      <td>
-        This is a tax invoice issued in accordance with Federal Decree-Law No. 8 of 2017 on Value Added Tax.
-        Keep this document for your records.
-      </td>
-      <td class="ar">
-        هذه فاتورة ضريبية صادرة وفقاً للمرسوم بقانون اتحادي رقم (8) لسنة 2017 في شأن ضريبة القيمة المضافة.
-        يُرجى الاحتفاظ بهذه الوثيقة.
-      </td>
+      {% if not is_ar %}
+      <td>{{ legal_en }}</td>
+      {% endif %}
+      <td class="ar">{{ legal_ar }}</td>
     </tr>
   </table>
 </div>

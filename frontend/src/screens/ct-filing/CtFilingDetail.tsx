@@ -10,6 +10,7 @@ import { useSession } from "../../lib/session";
 import { date, money } from "../../lib/format";
 import { t } from "../../i18n/strings";
 import { Card, CheckField, ErrorBox, Loading, PageHead, Pill, ReadRow, SumRow } from "../../components/ui";
+import { PrintLangButtons } from "../../components/PrintLangButtons";
 import DocHistory from "../../components/DocHistory";
 import { FormLayout } from "../../components/form";
 import LineItems, { type LineField } from "../../components/LineItems";
@@ -52,6 +53,7 @@ export default function CtFilingDetail() {
         actions={
           <>
             <DocHistory doctype={DT.ctFiling} name={name} />
+            <PrintLangButtons doctype={DT.ctFiling} name={name} format="UAE CT Worksheet" />
             <button type="button" className="btn" disabled={update.loading} onClick={() => {
             setSaveError(null);
             void update.updateDoc(DT.ctFiling, name, {

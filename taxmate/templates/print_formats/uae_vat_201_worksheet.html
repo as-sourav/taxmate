@@ -1,42 +1,49 @@
-{# VAT 201 worksheet — print from UAE VAT 201 Filing Log. PackageLoader path is templates/... #}
+{# VAT 201 worksheet. English print keeps bilingual headings. Arabic print uses Arabic headings.
+   Box numbers, amounts, and the company TRN are the stored figures. Do not pass bilingual pairs through _(). #}
+{% set is_ar = tm_is_arabic() %}
 <style>
-.tm-201 { font-family: sans-serif; font-size: 11pt; color: #111; }
+.tm-201 { font-family: "Noto Naskh Arabic", "Noto Sans", "DejaVu Sans", sans-serif; font-size: 11pt; color: #111; }
 .tm-201 h1 { color: #0b3d2e; font-size: 16pt; margin: 0 0 8px; }
 .tm-201 table { width: 100%; border-collapse: collapse; }
 .tm-201 td, .tm-201 th { border: 1px solid #ccc; padding: 5px 7px; }
 .tm-201 th { background: #0b3d2e; color: #fff; }
 .tm-201 .num { text-align: right; }
+.tm-201 .tm-ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
 .tm-201 .note { margin-top: 12px; font-size: 8.5pt; color: #444; }
 </style>
-<div class="tm-201">
-  <h1>{{ _("UAE VAT 201 Worksheet") }} / إقرار ضريبة القيمة المضافة</h1>
+<div class="tm-201"{% if is_ar %} dir="rtl"{% endif %}>
+  <h1>{% if is_ar %}إقرار ضريبة القيمة المضافة{% else %}UAE VAT 201 Worksheet / إقرار ضريبة القيمة المضافة{% endif %}</h1>
   <p>
-    <strong>{{ _("Company") }} / الشركة:</strong> {{ doc.company }}
-    {% if doc.company_trn %} · <strong>TRN / الرقم الضريبي:</strong> {{ doc.company_trn }}{% endif %}<br>
-    <strong>{{ _("Period") }} / الفترة:</strong> {{ doc.get_formatted("period_start") }} – {{ doc.get_formatted("period_end") }}
-    · <strong>{{ _("Due") }} / الاستحقاق:</strong> {{ doc.get_formatted("filing_due_date") }}
+    <strong>{% if is_ar %}الشركة{% else %}Company / الشركة{% endif %}:</strong> {{ doc.company }}
+    {% if doc.company_trn %} · <strong>{% if is_ar %}الرقم الضريبي{% else %}TRN / الرقم الضريبي{% endif %}:</strong> <span class="tm-ltr">{{ doc.company_trn }}</span>{% endif %}<br>
+    <strong>{% if is_ar %}الفترة{% else %}Period / الفترة{% endif %}:</strong> <span class="tm-ltr">{{ doc.get_formatted("period_start") }} – {{ doc.get_formatted("period_end") }}</span>
+    · <strong>{% if is_ar %}الاستحقاق{% else %}Due / الاستحقاق{% endif %}:</strong> <span class="tm-ltr">{{ doc.get_formatted("filing_due_date") }}</span>
   </p>
   <table>
     <thead>
       <tr>
-        <th>{{ _("Box") }} / البند</th>
-        <th>{{ _("Legend") }} / البيان</th>
-        <th class="num">{{ _("Amount") }} / المبلغ</th>
-        <th class="num">{{ _("VAT") }} / الضريبة</th>
+        <th>{% if is_ar %}البند{% else %}Box / البند{% endif %}</th>
+        <th>{% if is_ar %}البيان{% else %}Legend / البيان{% endif %}</th>
+        <th class="num">{% if is_ar %}المبلغ{% else %}Amount / المبلغ{% endif %}</th>
+        <th class="num">{% if is_ar %}الضريبة{% else %}VAT / الضريبة{% endif %}</th>
       </tr>
     </thead>
     <tbody>
       {% for row in doc.boxes %}
       <tr>
-        <td>{{ row.box_no }}</td>
+        <td><span class="tm-ltr">{{ row.box_no }}</span></td>
         <td>{{ row.legend }}</td>
-        <td class="num">{{ frappe.format(row.amount, {"fieldtype": "Currency", "currency": "AED"}) }}</td>
-        <td class="num">{{ frappe.format(row.vat_amount, {"fieldtype": "Currency", "currency": "AED"}) }}</td>
+        <td class="num"><span class="tm-ltr">{{ frappe.format(row.amount, {"fieldtype": "Currency", "currency": "AED"}) }}</span></td>
+        <td class="num"><span class="tm-ltr">{{ frappe.format(row.vat_amount, {"fieldtype": "Currency", "currency": "AED"}) }}</span></td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   <p class="note">
-    {{ _("This worksheet does not file the return. There is no public EmaraTax VAT 201 API as of 2026-09. File in the portal and keep this log as the audit record.") }}
+    {% if is_ar %}
+    هذه الورقة لا تُقدّم الإقرار. لا توجد واجهة عامة لإقرار ضريبة القيمة المضافة 201 حتى 2026-09. قدّم الإقرار في البوابة واحتفظ بهذا السجل.
+    {% else %}
+    This worksheet does not file the return. There is no public EmaraTax VAT 201 API as of 2026-09. File in the portal and keep this log as the audit record.
+    {% endif %}
   </p>
 </div>
