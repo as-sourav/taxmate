@@ -216,14 +216,40 @@ function CapturePanel({ onClose }: { onClose: () => void }) {
     await beginImageDraft(next);
   }
 
-  async function onTakePhoto() {
-    const shot = await takePhoto();
-    if (!shot.ok) {
-      setReview({ ok: false, error_key: shot.error_key, can_save: false });
-      return;
-    }
-    await beginImageDraft(shot.file);
+  // async function onTakePhoto() {
+  //   const shot = await takePhoto();
+  //   if (!shot.ok) {
+  //     setReview({ ok: false, error_key: shot.error_key, can_save: false });
+  //     return;
+  //   }
+  //   await beginImageDraft(shot.file);
+  // }
+
+
+async function onTakePhoto() {
+  const shot = await takePhoto();
+
+  if (!shot.ok) {
+    console.error("Camera capture failed:", shot.error_key, shot.detail);
+
+    setReview({
+      ok: false,
+      error_key: shot.error_key,
+      detail: shot.detail ?? null,
+      can_save: false,
+    });
+    return;
   }
+
+  console.log("Camera photo captured:", {
+    name: shot.file.name,
+    type: shot.file.type,
+    size: shot.file.size,
+  });
+
+  await beginImageDraft(shot.file);
+}
+
 
   useEffect(() => {
     if (!action || target) return;
