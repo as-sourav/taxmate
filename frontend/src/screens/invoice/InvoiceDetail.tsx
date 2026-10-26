@@ -2,6 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { printDocUrl } from "../../lib/printDoc";
 import { useDoc, useDocList } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canCancelSales, canSubmitSales, canWrite, eInvoiceLocked } from "../../lib/roles";
@@ -412,16 +413,8 @@ export default function InvoiceDetail() {
   );
 }
 
-/** Frappe's own print view — no custom endpoint, and it honours permissions. */
 function printUrl(name: string): string {
-  const p = new URLSearchParams({
-    doctype: DT.salesInvoice,
-    name,
-    trigger_print: "1",
-    format: "UAE Bilingual Tax Invoice",
-    no_letterhead: "0",
-  });
-  return `/printview?${p.toString()}`;
+  return printDocUrl(DT.salesInvoice, name, "UAE Bilingual Tax Invoice");
 }
 
 function EInvoicePipeline({ status, log }: { status?: string; log?: EInvoiceLog }) {

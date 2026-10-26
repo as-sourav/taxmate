@@ -2,6 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { printDocUrl } from "../../lib/printDoc";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canCancelSales, canSubmitSales, canWrite, eInvoiceLocked } from "../../lib/roles";
@@ -36,14 +37,7 @@ type Doc = {
 };
 
 function printUrl(name: string): string {
-  const p = new URLSearchParams({
-    doctype: DT.purchaseInvoice,
-    name,
-    trigger_print: "1",
-    format: "UAE Bilingual Purchase Invoice",
-    no_letterhead: "0",
-  });
-  return `/printview?${p.toString()}`;
+  return printDocUrl(DT.purchaseInvoice, name, "UAE Bilingual Purchase Invoice");
 }
 
 function piPill(status?: string): string {

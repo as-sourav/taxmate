@@ -30,5 +30,8 @@ UAE_TAX_PRINT_FORMATS = (
 	"UAE Bilingual Purchase Invoice",
 )
 
+# Payment receipt. Not part of the tax-invoice readiness check.
+UAE_BILINGUAL_PAYMENT = "UAE Bilingual Payment"
+
 # FTA Executive Regulations: simplified tax invoice allowed for B2C ≤ AED 10,000
 SIMPLIFIED_TAX_INVOICE_THRESHOLD_AED = 10000.0

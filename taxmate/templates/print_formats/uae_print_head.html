@@ -1,0 +1,10 @@
+{# Letterhead and document status. Same marks Desk's add_header prints.
+   Included by the bilingual invoice and payment formats. #}
+{% if letter_head is defined and letter_head and not no_letterhead %}
+<div class="letter-head">{{ letter_head }}</div>
+{% endif %}
+{% if doc is defined and doc.docstatus == 0 and (print_settings is not defined or print_settings.get("add_draft_heading") != 0) %}
+<div class="text-center"><h4 style="margin:0">DRAFT / مسودة</h4></div>
+{% elif doc is defined and doc.docstatus == 2 %}
+<div class="text-center"><h4 style="margin:0">CANCELLED / ملغى</h4></div>
+{% endif %}
