@@ -574,6 +574,9 @@ _ERP_FILLED: frozenset[str] = _SYSTEM_GAPS | frozenset(
 # Currency and place of supply block the draft until filled. Submit stays off unless they ask.
 _WRITABLE: tuple[str, ...] = ("currency", "due_date", "cost_center", "vat_emirate")
 _SALES_EMIRATE: frozenset[str] = frozenset({"Sales Invoice", "Sales Order"})
+_SALES_PARTY: frozenset[str] = frozenset(
+	{"Sales Invoice", "Sales Order", "Quotation", "Delivery Note"}
+)
 EMIRATES: tuple[str, ...] = (
 	"Abu Dhabi",
 	"Ajman",
@@ -603,10 +606,20 @@ CURRENCIES: tuple[str, ...] = (
 )
 
 
-def gaps_from_validation(validation: dict[str, Any]) -> list[str]:
+def _open_fields(doctype: str | None) -> frozenset[str]:
+	"""Fields the clerk can type, plus an item code that becomes a create card."""
+	fields = set(_WRITABLE)
+	fields.add("item_code")
+	if doctype in _SALES_PARTY:
+		fields.add("customer")
+	return frozenset(fields)
+
+
+def gaps_from_validation(validation: dict[str, Any], doctype: str | None = None) -> list[str]:
 	"""Plain labels for what the clerk still has to fix. System defaults stay off the list."""
 	keys: list[str] = []
 	seen: set[str] = set()
+	open_fields = _open_fields(doctype)
 
 	def add(key: str) -> None:
 		if key not in seen:
@@ -621,7 +634,7 @@ def gaps_from_validation(validation: dict[str, Any]) -> list[str]:
 			message = str(row.get("message") or "")
 		elif isinstance(row, str):
 			message = row
-		if field in _ERP_FILLED or field in _WRITABLE:
+		if field in _ERP_FILLED or field in open_fields:
 			continue
 		if "line item" in message.lower():
 			add("idp.gap.items")
@@ -657,11 +670,14 @@ def writes_from_extract(
 		elif field == "currency":
 			row["options"] = list(CURRENCIES)
 		rows.append(row)
+	if doctype in _SALES_PARTY and not str(header.get("customer") or "").strip():
+		rows.insert(0, {"field": "customer", "label_key": "f.customer", "value": "", "options": []})
 	return rows
 
 
-def _unexplained(validation: dict[str, Any]) -> bool:
+def _unexplained(validation: dict[str, Any], doctype: str | None = None) -> bool:
 	"""True when a schema error is neither a labeled gap nor a field the clerk can type."""
+	open_fields = _open_fields(doctype)
 	for row in validation.get("errors") or []:
 		field = ""
 		message = ""
@@ -670,7 +686,7 @@ def _unexplained(validation: dict[str, Any]) -> bool:
 			message = str(row.get("message") or "")
 		elif isinstance(row, str):
 			message = row
-		if field in _ERP_FILLED or field in _WRITABLE:
+		if field in _ERP_FILLED or field in open_fields:
 			continue
 		if "line item" in message.lower():
 			continue
@@ -678,6 +694,23 @@ def _unexplained(validation: dict[str, Any]) -> bool:
 			continue
 		return True
 	return False
+
+
+def keep_known_fields(
+	header: dict[str, Any],
+	items: list[Any],
+	parent_fields: set[str],
+	child_fields: set[str],
+) -> tuple[dict[str, Any], list[Any]]:
+	"""Drop OCR keys the target document does not have. A sale has no supplier field."""
+	clean_header = {key: value for key, value in header.items() if key in parent_fields}
+	clean_items: list[Any] = []
+	for row in items:
+		if not isinstance(row, dict):
+			clean_items.append(row)
+			continue
+		clean_items.append({key: value for key, value in row.items() if key in child_fields})
+	return clean_header, clean_items
 
 
 def apply_writes(
@@ -691,7 +724,7 @@ def apply_writes(
 
 	out = dict(header)
 	clean_items = [dict(row) if isinstance(row, dict) else row for row in items]
-	for field in _WRITABLE:
+	for field in (*_WRITABLE, "customer"):
 		text = str((fills or {}).get(field) or "").strip()
 		if text:
 			out[field] = text.strip().upper()[:3] if field == "currency" else text[:140]
@@ -816,10 +849,11 @@ def review_from_extract(extracted: dict[str, Any], *, route: str | None) -> dict
 	proposals = build_proposals(extracted) if not blocked else []
 	raw_header = data.get("header") or {}
 	# Gaps and typed fields stay available when the only missing Links are creatable.
-	gaps = gaps_from_validation(validation) if not blocked else []
-	writes = writes_from_extract(raw_header, validation, doctype=data.get("doctype")) if not blocked else []
+	doctype = str(data.get("doctype") or "")
+	gaps = gaps_from_validation(validation, doctype) if not blocked else []
+	writes = writes_from_extract(raw_header, validation, doctype=doctype) if not blocked else []
 	has_blockers = bool(blocked)
-	can_save = not has_blockers and bool(header) and not gaps and not _unexplained(validation)
+	can_save = not has_blockers and bool(header) and not gaps and not _unexplained(validation, doctype)
 	error_key = None
 	detail = None
 	if has_blockers:
