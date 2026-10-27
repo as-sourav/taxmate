@@ -1,0 +1,4 @@
+{# Letterhead footer. Included by the bilingual invoice and payment formats. #}
+{% if footer is defined and footer and not no_letterhead %}
+<div class="letter-head-footer">{{ footer }}</div>
+{% endif %}

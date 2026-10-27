@@ -2,6 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { PrintLangButtons } from "../../components/PrintLangButtons";
 import { useDoc, useDocList } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canCancelSales, canSubmitSales, canWrite, eInvoiceLocked } from "../../lib/roles";
@@ -16,7 +17,6 @@ import { FormLayout } from "../../components/form";
 import DetailActions from "../../components/DetailActions";
 import LineItems, { type LineField } from "../../components/LineItems";
 import { useDeleteDraftAction } from "../../lib/useDraftDelete";
-import { isNative } from "../../mobile/platform";
 
 /** The pipeline the e-invoice walks, in order. */
 const PIPE = ["Generated", "Queued", "Submitted", "Accepted"] as const;
@@ -196,12 +196,7 @@ export default function InvoiceDetail() {
                     {t("inv.credit")}
                   </button>
                 )}
-                {/* Print view needs a cookie session; the app gets PDF sharing in round 3. */}
-                {!isNative() && (
-                <button type="button" className="btn ghost" onClick={() => window.open(printUrl(name), "_blank", "noopener")}>
-                  {t("inv.print")}
-                </button>
-                )}
+                <PrintLangButtons doctype={DT.salesInvoice} name={name} format="UAE Bilingual Tax Invoice" />
               </>
             }
           />
@@ -410,18 +405,6 @@ export default function InvoiceDetail() {
       </FormLayout>
     </>
   );
-}
-
-/** Frappe's own print view — no custom endpoint, and it honours permissions. */
-function printUrl(name: string): string {
-  const p = new URLSearchParams({
-    doctype: DT.salesInvoice,
-    name,
-    trigger_print: "1",
-    format: "UAE Bilingual Tax Invoice",
-    no_letterhead: "0",
-  });
-  return `/printview?${p.toString()}`;
 }
 
 function EInvoicePipeline({ status, log }: { status?: string; log?: EInvoiceLog }) {

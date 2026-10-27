@@ -1,58 +1,61 @@
-{# Corporate Tax worksheet — print from UAE CT Filing Log. PackageLoader path is templates/... #}
+{# Corporate tax worksheet. English print keeps bilingual headings. Arabic print uses Arabic headings.
+   Amounts and the company TRN stay as stored. Regime and adjustment rows are stored data. #}
+{% set is_ar = tm_is_arabic() %}
 <style>
-.tm-ct { font-family: sans-serif; font-size: 11pt; color: #111; }
+.tm-ct { font-family: "Noto Naskh Arabic", "Noto Sans", "DejaVu Sans", sans-serif; font-size: 11pt; color: #111; }
 .tm-ct h1 { color: #0b3d2e; font-size: 16pt; margin: 0 0 8px; }
 .tm-ct table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
 .tm-ct td, .tm-ct th { border: 1px solid #ccc; padding: 5px 7px; }
 .tm-ct th { background: #0b3d2e; color: #fff; }
 .tm-ct .num { text-align: right; }
+.tm-ct .tm-ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
 .tm-ct .note { margin-top: 12px; font-size: 8.5pt; color: #444; }
 </style>
-<div class="tm-ct">
-  <h1>{{ _("UAE Corporate Tax Worksheet") }} / ورقة ضريبة الشركات</h1>
+<div class="tm-ct"{% if is_ar %} dir="rtl"{% endif %}>
+  <h1>{% if is_ar %}ورقة عمل ضريبة الشركات{% else %}UAE Corporate Tax Worksheet / ورقة عمل ضريبة الشركات{% endif %}</h1>
   <p>
-    <strong>{{ _("Company") }}:</strong> {{ doc.company }}
-    {% if doc.company_trn %} · <strong>TRN:</strong> {{ doc.company_trn }}{% endif %}<br>
-    <strong>{{ _("Period") }}:</strong> {{ doc.get_formatted("period_start") }} – {{ doc.get_formatted("period_end") }}
-    · <strong>{{ _("Due") }}:</strong> {{ doc.get_formatted("filing_due_date") }}<br>
-    <strong>{{ _("Regime") }}:</strong> {{ doc.regime or "" }}
+    <strong>{% if is_ar %}الشركة{% else %}Company / الشركة{% endif %}:</strong> {{ doc.company }}
+    {% if doc.company_trn %} · <strong>{% if is_ar %}الرقم الضريبي{% else %}TRN / الرقم الضريبي{% endif %}:</strong> <span class="tm-ltr">{{ doc.company_trn }}</span>{% endif %}<br>
+    <strong>{% if is_ar %}الفترة{% else %}Period / الفترة{% endif %}:</strong> <span class="tm-ltr">{{ doc.get_formatted("period_start") }} – {{ doc.get_formatted("period_end") }}</span>
+    · <strong>{% if is_ar %}الاستحقاق{% else %}Due / الاستحقاق{% endif %}:</strong> <span class="tm-ltr">{{ doc.get_formatted("filing_due_date") }}</span><br>
+    <strong>{% if is_ar %}النظام{% else %}Regime / النظام{% endif %}:</strong> {{ doc.regime or "" }}
   </p>
   <table>
     <thead>
       <tr>
-        <th>{{ _("Line") }}</th>
-        <th class="num">{{ _("Amount (AED)") }}</th>
+        <th>{% if is_ar %}البند{% else %}Line / البند{% endif %}</th>
+        <th class="num">{% if is_ar %}المبلغ{% else %}Amount (AED) / المبلغ{% endif %}</th>
       </tr>
     </thead>
     <tbody>
-      <tr><td>{{ _("Revenue") }}</td><td class="num">{{ frappe.format(doc.revenue, {"fieldtype": "Currency", "currency": "AED"}) }}</td></tr>
-      <tr><td>{{ _("Expenses") }}</td><td class="num">{{ frappe.format(doc.expenses, {"fieldtype": "Currency", "currency": "AED"}) }}</td></tr>
-      <tr><td>{{ _("Accounting Profit") }}</td><td class="num">{{ frappe.format(doc.accounting_profit, {"fieldtype": "Currency", "currency": "AED"}) }}</td></tr>
-      <tr><td>{{ _("Taxable Profit") }}</td><td class="num">{{ frappe.format(doc.taxable_profit, {"fieldtype": "Currency", "currency": "AED"}) }}</td></tr>
-      <tr><td><strong>{{ _("Tax Payable") }}</strong></td><td class="num"><strong>{{ frappe.format(doc.tax_payable, {"fieldtype": "Currency", "currency": "AED"}) }}</strong></td></tr>
+      <tr><td>{% if is_ar %}الإيرادات{% else %}Revenue / الإيرادات{% endif %}</td><td class="num"><span class="tm-ltr">{{ frappe.format(doc.revenue, {"fieldtype": "Currency", "currency": "AED"}) }}</span></td></tr>
+      <tr><td>{% if is_ar %}المصروفات{% else %}Expenses / المصروفات{% endif %}</td><td class="num"><span class="tm-ltr">{{ frappe.format(doc.expenses, {"fieldtype": "Currency", "currency": "AED"}) }}</span></td></tr>
+      <tr><td>{% if is_ar %}الربح المحاسبي{% else %}Accounting Profit / الربح المحاسبي{% endif %}</td><td class="num"><span class="tm-ltr">{{ frappe.format(doc.accounting_profit, {"fieldtype": "Currency", "currency": "AED"}) }}</span></td></tr>
+      <tr><td>{% if is_ar %}الربح الخاضع للضريبة{% else %}Taxable Profit / الربح الخاضع للضريبة{% endif %}</td><td class="num"><span class="tm-ltr">{{ frappe.format(doc.taxable_profit, {"fieldtype": "Currency", "currency": "AED"}) }}</span></td></tr>
+      <tr><td><strong>{% if is_ar %}الضريبة المستحقة{% else %}Tax Payable / الضريبة المستحقة{% endif %}</strong></td><td class="num"><strong><span class="tm-ltr">{{ frappe.format(doc.tax_payable, {"fieldtype": "Currency", "currency": "AED"}) }}</span></strong></td></tr>
     </tbody>
   </table>
   {% if doc.elect_qfzp %}
-  <p><strong>{{ _("QFZP split") }}</strong></p>
+  <p><strong>{% if is_ar %}تقسيم المنطقة الحرة المؤهلة{% else %}QFZP split / تقسيم المنطقة الحرة المؤهلة{% endif %}</strong></p>
   <table>
     <tbody>
-      <tr><td>{{ _("Qualifying Revenue") }}</td><td class="num">{{ frappe.format(doc.qualifying_revenue, {"fieldtype": "Currency", "currency": "AED"}) }}</td></tr>
-      <tr><td>{{ _("Non-Qualifying Revenue") }}</td><td class="num">{{ frappe.format(doc.non_qualifying_revenue, {"fieldtype": "Currency", "currency": "AED"}) }}</td></tr>
-      <tr><td>{{ _("Unclassified Revenue") }}</td><td class="num">{{ frappe.format(doc.unclassified_revenue, {"fieldtype": "Currency", "currency": "AED"}) }}</td></tr>
-      <tr><td>{{ _("De Minimis Limit") }}</td><td class="num">{{ frappe.format(doc.de_minimis_limit, {"fieldtype": "Currency", "currency": "AED"}) }}</td></tr>
-      <tr><td>{{ _("De Minimis Passed") }}</td><td class="num">{% if doc.de_minimis_passed %}{{ _("Yes") }}{% else %}{{ _("No") }}{% endif %}</td></tr>
+      <tr><td>{% if is_ar %}الإيراد المؤهل{% else %}Qualifying Revenue / الإيراد المؤهل{% endif %}</td><td class="num"><span class="tm-ltr">{{ frappe.format(doc.qualifying_revenue, {"fieldtype": "Currency", "currency": "AED"}) }}</span></td></tr>
+      <tr><td>{% if is_ar %}الإيراد غير المؤهل{% else %}Non-Qualifying Revenue / الإيراد غير المؤهل{% endif %}</td><td class="num"><span class="tm-ltr">{{ frappe.format(doc.non_qualifying_revenue, {"fieldtype": "Currency", "currency": "AED"}) }}</span></td></tr>
+      <tr><td>{% if is_ar %}الإيراد غير المصنف{% else %}Unclassified Revenue / الإيراد غير المصنف{% endif %}</td><td class="num"><span class="tm-ltr">{{ frappe.format(doc.unclassified_revenue, {"fieldtype": "Currency", "currency": "AED"}) }}</span></td></tr>
+      <tr><td>{% if is_ar %}حد الاستثناء{% else %}De Minimis Limit / حد الاستثناء{% endif %}</td><td class="num"><span class="tm-ltr">{{ frappe.format(doc.de_minimis_limit, {"fieldtype": "Currency", "currency": "AED"}) }}</span></td></tr>
+      <tr><td>{% if is_ar %}اجتياز الحد الأدنى{% else %}De Minimis Passed / اجتياز الحد الأدنى{% endif %}</td><td class="num">{% if doc.de_minimis_passed %}{% if is_ar %}نعم{% else %}Yes / نعم{% endif %}{% else %}{% if is_ar %}لا{% else %}No / لا{% endif %}{% endif %}</td></tr>
     </tbody>
   </table>
   {% endif %}
   {% if doc.adjustments %}
-  <p><strong>{{ _("Adjustments") }}</strong></p>
+  <p><strong>{% if is_ar %}التسويات{% else %}Adjustments / التسويات{% endif %}</strong></p>
   <table>
     <thead>
       <tr>
-        <th>{{ _("Type") }}</th>
-        <th>{{ _("Category") }}</th>
-        <th class="num">{{ _("Amount (AED)") }}</th>
-        <th>{{ _("Notes") }}</th>
+        <th>{% if is_ar %}النوع{% else %}Type / النوع{% endif %}</th>
+        <th>{% if is_ar %}الفئة{% else %}Category / الفئة{% endif %}</th>
+        <th class="num">{% if is_ar %}المبلغ{% else %}Amount (AED) / المبلغ{% endif %}</th>
+        <th>{% if is_ar %}ملاحظات{% else %}Notes / ملاحظات{% endif %}</th>
       </tr>
     </thead>
     <tbody>
@@ -60,7 +63,7 @@
       <tr>
         <td>{{ row.adjustment_type }}</td>
         <td>{{ row.category }}</td>
-        <td class="num">{{ frappe.format(row.amount, {"fieldtype": "Currency", "currency": "AED"}) }}</td>
+        <td class="num"><span class="tm-ltr">{{ frappe.format(row.amount, {"fieldtype": "Currency", "currency": "AED"}) }}</span></td>
         <td>{{ row.notes or "" }}</td>
       </tr>
       {% endfor %}
@@ -68,6 +71,10 @@
   </table>
   {% endif %}
   <p class="note">
-    {{ _("This worksheet does not file the Corporate Tax return. There is no public FTA CT e-file API as of 2026-09. File on the FTA portal and keep this log as the audit record.") }}
+    {% if is_ar %}
+    هذه الورقة لا تُقدّم إقرار ضريبة الشركات. لا توجد واجهة عامة للتقديم الإلكتروني حتى 2026-09. قدّم الإقرار في بوابة الهيئة واحتفظ بهذا السجل.
+    {% else %}
+    This worksheet does not file the Corporate Tax return. There is no public FTA CT e-file API as of 2026-09. File on the FTA portal and keep this log as the audit record.
+    {% endif %}
   </p>
 </div>

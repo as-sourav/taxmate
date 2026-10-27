@@ -1,0 +1,7 @@
+{# Shared amount for UAE prints. Callers: uae_bilingual_tax_invoice.html,
+   uae_bilingual_payment.html. The Latin code stays visible in RTL. #}
+{% macro uae_money(amount, currency) -%}
+{%- set code = currency or "AED" -%}
+{%- set num = frappe.utils.fmt_money(amount or 0) -%}
+<span class="tm-amt" dir="ltr">{{ code }} {{ num }}{% if code == "AED" %} (د.إ){% endif %}</span>
+{%- endmacro %}
