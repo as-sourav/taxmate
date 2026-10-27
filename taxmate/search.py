@@ -164,7 +164,6 @@ DENIED_SEARCH_DOCTYPES = frozenset(
 		"Leave Application",
 		"Job Card",
 		"Production Plan",
-		"Opportunity",
 		"Issue",
 		"Project",
 		"Task",

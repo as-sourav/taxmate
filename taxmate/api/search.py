@@ -82,6 +82,14 @@ _SPA_LIST_ROUTES: dict[str, str] = {
 	"Currency Exchange": "/currency-exchanges",
 	"Asset Category": "/asset-categories",
 	"Asset": "/assets",
+	"Opportunity": "/opportunities",
+	"Request for Quotation": "/request-for-quotations",
+	"Shipment": "/shipments",
+	"Installation Note": "/installation-notes",
+	"Delivery Trip": "/delivery-trips",
+	"Payment Request": "/payment-requests",
+	"Subcontracting Order": "/subcontracting-orders",
+	"Subcontracting Inward Order": "/subcontracting-inward-orders",
 }
 
 # In-app pages (AwesomeBar “pages” feel) — SPA routes only.
@@ -260,6 +268,14 @@ _NAV_PAGES: tuple[dict[str, str], ...] = (
 	{"label": "Work Orders", "route": "/work-orders", "keywords": "work order manufacture production job"},
 	# Phase 21
 	{"label": "Leads", "route": "/leads", "keywords": "lead prospect crm potential customer sales inquiry"},
+	{"label": "Opportunities", "route": "/opportunities", "keywords": "opportunity crm enquiry lead customer"},
+	{"label": "Requests for Quotation", "route": "/request-for-quotations", "keywords": "request for quotation rfq supplier"},
+	{"label": "Shipments", "route": "/shipments", "keywords": "shipment delivery dispatch parcel"},
+	{"label": "Installation Notes", "route": "/installation-notes", "keywords": "installation note install delivery"},
+	{"label": "Delivery Trips", "route": "/delivery-trips", "keywords": "delivery trip driver vehicle route"},
+	{"label": "Payment Requests", "route": "/payment-requests", "keywords": "payment request collect pay"},
+	{"label": "Subcontracting Orders", "route": "/subcontracting-orders", "keywords": "subcontracting order job worker purchase"},
+	{"label": "Subcontracting Inward Orders", "route": "/subcontracting-inward-orders", "keywords": "subcontracting inward order customer sales"},
 	# Phase 22 — UAE compliance write screens
 	{
 		"label": "UAE Related Parties",

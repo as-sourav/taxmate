@@ -112,6 +112,20 @@ export type TxnLine = {
   material_request?: string;
   material_request_item?: string;
   schedule_date?: string;
+  /** Order and receipt links ERPNext reads when stock is posted. */
+  sales_order?: string;
+  so_detail?: string;
+  against_sales_order?: string;
+  delivery_note?: string;
+  dn_detail?: string;
+  purchase_order?: string;
+  purchase_order_item?: string;
+  po_detail?: string;
+  purchase_receipt?: string;
+  pr_detail?: string;
+  serial_and_batch_bundle?: string;
+  use_serial_batch_fields?: 0 | 1;
+  rejected_qty?: number;
 };
 
 export type PartyDetails = {
@@ -410,7 +424,41 @@ export function linePayload(l: TxnLine): Record<string, unknown> {
     sac_code: l.sac_code,
     uae_is_margin_scheme: l.uae_is_margin_scheme ? 1 : 0,
     uae_purchase_price: l.uae_is_margin_scheme ? l.uae_purchase_price : undefined,
+    sales_order: l.sales_order,
+    so_detail: l.so_detail,
+    against_sales_order: l.against_sales_order,
+    delivery_note: l.delivery_note,
+    dn_detail: l.dn_detail,
+    purchase_order: l.purchase_order,
+    purchase_order_item: l.purchase_order_item,
+    po_detail: l.po_detail,
+    purchase_receipt: l.purchase_receipt,
+    pr_detail: l.pr_detail,
+    serial_and_batch_bundle: l.serial_and_batch_bundle,
+    use_serial_batch_fields: l.use_serial_batch_fields,
+    rejected_qty: l.rejected_qty,
   };
+}
+
+const _ROW_META = new Set([
+  "name", "doctype", "parent", "parentfield", "parenttype", "idx",
+  "owner", "creation", "modified", "modified_by", "docstatus",
+]);
+
+/** Copy a mapped or saved item, including the order and batch links stock depends on. */
+export function mappedItem(row: object, warehouse?: string): TxnLine {
+  const src = row as Record<string, unknown>;
+  const line: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(src)) {
+    if (_ROW_META.has(key) || value == null || value === "") continue;
+    line[key] = value;
+  }
+  line.item_code = String(src.item_code || "");
+  line.qty = Number(src.qty) || 1;
+  line.rate = Number(src.rate) || 0;
+  if (!line.warehouse && warehouse) line.warehouse = warehouse;
+  if (src.use_serial_batch_fields != null) line.use_serial_batch_fields = src.use_serial_batch_fields ? 1 : 0;
+  return line as TxnLine;
 }
 
 export function useTransactionRpc({ doctype, side, company }: UseTxnArgs) {

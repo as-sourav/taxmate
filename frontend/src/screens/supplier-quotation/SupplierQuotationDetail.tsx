@@ -20,6 +20,7 @@ import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow } from "../../componen
 import { TxnTotals } from "../../components/txnFields";
 import { productDiscountTotal, readDiscountBasis } from "../../lib/txn";
 import DocHistory from "../../components/DocHistory";
+import UpdateItems from "../../components/UpdateItems";
 import LineItems, { type LineField } from "../../components/LineItems";
 import { isNative } from "../../mobile/platform";
 
@@ -51,6 +52,7 @@ export default function SupplierQuotationDetail() {
   const canCancel = canCancelSales(session.roles);
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.supplierQuotation, name);
   const makePo = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeSupplierQuotationPO);
+  const makeQuote = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeSupplierQuotationQuotation);
   const submitCall = useFrappePostCall(METHOD.submit);
   const cancelCall = useFrappePostCall(METHOD.cancel);
   const amendCall = useFrappePostCall<{ message?: { name?: string } }>(METHOD.amend);
@@ -69,6 +71,20 @@ export default function SupplierQuotationDetail() {
       delete body.name; delete body.doctype; delete body.__islocal; delete body.__unsaved;
       const created = await create.createDoc(DT.purchaseOrder, body);
       nav(`/purchase-orders/${encodeURIComponent((created as { name: string }).name)}`);
+    } catch (err) { setActionError(err); }
+    finally { setBusy(false); }
+  }
+
+  async function createQuotation() {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const res = await makeQuote.call({ source_name: name });
+      const mapped = res?.message;
+      if (!mapped) throw new Error(t("doc.err.mapFailed"));
+      const body: Record<string, unknown> = { ...mapped };
+      delete body.name; delete body.doctype; delete body.__islocal; delete body.__unsaved;
+      nav("/quotations/new", { state: { mapped: body } });
     } catch (err) { setActionError(err); }
     finally { setBusy(false); }
   }
@@ -134,7 +150,10 @@ export default function SupplierQuotationDetail() {
         {data.docstatus === 1 && (
           <>
             {writable && (
+            <>
             <button className="btn" onClick={() => void createPO()} disabled={busy}>{t("sq.makePO")}</button>
+            <button className="btn ghost" onClick={() => void createQuotation()} disabled={busy}>{t("nav.quotations")}</button>
+            </>
             )}
             {canCancel && (
             <button className="btn ghost" onClick={() => void doCancel()} disabled={busy}>{t("sq.cancel")}</button>
@@ -153,6 +172,9 @@ export default function SupplierQuotationDetail() {
           <ReadRow k={t("sq.col.validTill")} v={date(data.valid_till)} />
         </div>
       </Card>
+      {data.docstatus === 1 && writable && (
+        <UpdateItems doctype={DT.supplierQuotation} name={name} items={data.items ?? []} onSaved={() => void mutate()} />
+      )}
       <Card title={t("sq.items")}>
         {/* Read-only quotation lines: no add, no remove, collapse off. The
             SumRows below were never a <tfoot> — they stay card siblings. */}

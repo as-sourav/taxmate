@@ -89,6 +89,16 @@ _SPA_BOOKS: tuple[str, ...] = (
 	"Loyalty Point Entry",
 	"Asset Category",
 	"Currency Exchange",
+	"Opportunity",
+	"Request for Quotation",
+	"Shipment",
+	"Installation Note",
+	"Delivery Trip",
+	"Payment Request",
+	"Subcontracting Order",
+	"Subcontracting Inward Order",
+	"Driver",
+	"Vehicle",
 )
 
 MANAGED_ROLES: frozenset[str] = frozenset(

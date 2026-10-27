@@ -3,7 +3,7 @@
  * Routes: /quotations/new, /quotations/:name/edit
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
@@ -73,6 +73,17 @@ export default function QuotationForm() {
   const [party, setParty] = useState<PartyDetails>({});
   const [conversionRate, setConversionRate] = useState(1);
   const [lines, setLines] = useState<TxnLine[]>([]);
+  const location = useLocation();
+  useEffect(() => {
+    if (name !== "new") return;
+    const mapped = (location.state as { mapped?: Record<string, unknown> } | null)?.mapped;
+    if (!mapped) return;
+    if (mapped.party_name) setCustomer(String(mapped.party_name));
+    const items = (mapped.items as { item_code?: string; qty?: number; rate?: number; uom?: string }[] | undefined) ?? [];
+    if (items.length) {
+      setLines(items.map((row) => ({ item_code: row.item_code || "", qty: Number(row.qty) || 1, rate: Number(row.rate) || 0, uom: row.uom })));
+    }
+  }, [name, location.state]);
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
   const keepDraftParty = useRef(false);

@@ -4,7 +4,7 @@
  */
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useFrappePostCall } from "frappe-react-sdk";
+import { useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
 import { useDoc } from "../../lib/resource";
@@ -17,6 +17,8 @@ import { productDiscountTotal, readDiscountBasis } from "../../lib/txn";
 import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow } from "../../components/ui";
 import { FormLayout } from "../../components/form";
 import DetailActions from "../../components/DetailActions";
+import UpdateItems from "../../components/UpdateItems";
+import LinkField from "../../components/LinkField";
 import LineItems, { type LineField } from "../../components/LineItems";
 import { useDeleteDraftAction } from "../../lib/useDraftDelete";
 import { printDocUrl } from "../../lib/printDoc";
@@ -49,6 +51,13 @@ export default function QuotationDetail() {
   const makeSO = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeQuotationSO);
   const [mapBusy, setMapBusy] = useState(false);
   const [mapError, setMapError] = useState<unknown>(null);
+  const [lostReason, setLostReason] = useState("");
+  const declareLost = useFrappePostCall(METHOD.declareQuotationLost);
+  const orderAllowed = useFrappeGetCall<{ message: { allowed?: number } }>(
+    METHOD.quotationSalesOrderAllowed,
+    { name },
+    name ? `quot-can-order-${name}` : null,
+  );
   const canSubmit = canSubmitSales(session.roles);
   const canCancel = canCancelSales(session.roles);
 
@@ -58,6 +67,8 @@ export default function QuotationDetail() {
 
   const draft = data.docstatus === 0;
   const submitted = data.docstatus === 1;
+  const canOrder = submitted && data.status !== "Lost" && data.status !== "Ordered"
+    && orderAllowed.data?.message?.allowed === 1;
 
   // Delivery Date is mandatory on Sales Order, not Quotation. Open the SO
   // form with the mapped draft (same pattern as Material Request → PO) so
@@ -115,7 +126,16 @@ export default function QuotationDetail() {
                   {t("inv.print")}
                 </button>
                 )}
-                {submitted ? (
+                {canOrder && canWrite(session) ? (
+                  <>
+                    <LinkField doctype="Quotation Lost Reason" value={lostReason} onChange={setLostReason} />
+                    <button type="button" className="btn ghost" disabled={!lostReason || declareLost.loading}
+                      onClick={() => void declareLost.call({ name, lost_reason: lostReason }).then(() => mutate()).catch(() => undefined)}>
+                      Set as Lost
+                    </button>
+                  </>
+                ) : null}
+                {canOrder ? (
                   <button type="button" className="btn" disabled={mapBusy}
                     onClick={() => void createSO()}>
                     {mapBusy ? t("soc.saving") : t("quot.makeSO")}
@@ -132,8 +152,8 @@ export default function QuotationDetail() {
         </p>
       </PageHead>
 
-      {(submitCall.error || cancelCall.error || amendCall.error || mapError) && (
-        <ErrorBox error={submitCall.error || cancelCall.error || amendCall.error || mapError} />
+      {(submitCall.error || cancelCall.error || amendCall.error || mapError || declareLost.error || orderAllowed.error) && (
+        <ErrorBox error={submitCall.error || cancelCall.error || amendCall.error || mapError || declareLost.error || orderAllowed.error} />
       )}
 
       <FormLayout aside={
@@ -162,6 +182,9 @@ export default function QuotationDetail() {
             <ReadRow k={t("f.emirate")} v={data.vat_emirate || "—"} />
           </div>
         </Card>
+        {canOrder && canWrite(session) && (
+          <UpdateItems doctype={DT.quotation} name={name} items={data.items ?? []} onSaved={() => void mutate()} />
+        )}
         <Card title={t("inv.lines")}>
           {/* The quoted lines, read-only — the quotation is edited on its own
               form. collapse={false} keeps the rate on the card. */}

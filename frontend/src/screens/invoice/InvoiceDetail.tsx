@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { useOpenMapped } from "../../lib/openMapped";
 import { PrintLangButtons } from "../../components/PrintLangButtons";
-import { useDoc, useDocList } from "../../lib/resource";
+import { useDoc, useDocList, useInsert } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canCancelSales, canSubmitSales, canWrite, eInvoiceLocked } from "../../lib/roles";
 import { date, datetime, money, qty } from "../../lib/format";
@@ -26,6 +28,8 @@ type Line = {
   name?: string; item_code?: string; item_name?: string; qty?: number; uom?: string;
   rate?: number; amount?: number; uae_item_type?: string; hs_code?: string; sac_code?: string;
   price_list_rate?: number; discount_percentage?: number; discount_amount?: number;
+  delivered_qty?: number; is_delivered_by_supplier?: number; delivered_by_supplier?: number;
+  dn_detail?: string; scio_detail?: string;
 };
 
 type Doc = {
@@ -37,7 +41,7 @@ type Doc = {
   discount_amount?: number; additional_discount_percentage?: number; apply_discount_on?: string;
   outstanding_amount?: number; currency?: string; total_advance?: number;
   allocate_advances_automatically?: number; advances?: unknown[];
-  docstatus?: 0 | 1 | 2; status?: string;
+  docstatus?: 0 | 1 | 2; status?: string; update_stock?: number;
   is_return?: number; return_against?: string; uae_credit_note_reason?: string;
   uae_e_invoice_status?: string; items?: Line[];
 };
@@ -110,12 +114,35 @@ export default function InvoiceDetail() {
   const einvoiceCall = useFrappePostCall(METHOD.generateEInvoice);
   const syncCall = useFrappePostCall(METHOD.syncEInvoiceStatus);
   const fetchCall = useFrappePostCall(METHOD.fetchEInvoiceDocuments);
+  const makeDn = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeSiDeliveryNote);
+  const makePayReq = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makePaymentRequest);
+  const paymentRequest = useOpenMapped("/payment-requests");
+  const create = useInsert();
+  const [dnError, setDnError] = useState<unknown>(null);
 
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={() => mutate()} />;
   if (!data) return null;
 
   const cur = data.currency || session.currency || "";
+
+  async function createDelivery() {
+    setDnError(null);
+    try {
+      const res = await makeDn.call({ source_name: name });
+      const mapped = res?.message;
+      if (!mapped) throw new Error(t("doc.err.mapFailed"));
+      const body: Record<string, unknown> = { ...mapped };
+      delete body.name;
+      delete body.doctype;
+      delete body.__islocal;
+      delete body.__unsaved;
+      const created = await create.createDoc(DT.deliveryNote, body) as { name: string };
+      nav(`/delivery-notes/${encodeURIComponent(created.name)}`);
+    } catch (err) {
+      setDnError(err);
+    }
+  }
   const ui = invoiceUiStatus(data);
   const late = isInvoiceOverdue(data);
   const draft = data.docstatus === 0;
@@ -134,7 +161,7 @@ export default function InvoiceDetail() {
      The log in particular is readable by System Manager, Accounts Manager
      and Accounts User only, so a UAE-Tax-Manager-only user sees why the
      e-invoice actions are missing rather than nothing at all.            */
-  const busyError = submitCall.error || cancelCall.error || amendCall.error || deleteAction.error || einvoiceCall.error
+  const busyError = dnError || submitCall.error || cancelCall.error || amendCall.error || deleteAction.error || einvoiceCall.error || paymentRequest.error
     || syncCall.error || fetchCall.error
     || payments.error || creditNotes.error || logs.error;
 
@@ -186,12 +213,24 @@ export default function InvoiceDetail() {
             }}
             extra={
               <>
-                {submitted && outstanding > 0 && (
-                  <button className="btn" onClick={() => nav(`/payments/new?invoice=${encodeURIComponent(name)}`)}>
+                {submitted && outstanding !== 0 && (
+                  <button className="btn" onClick={() => nav(`/payments/new?dt=${encodeURIComponent(DT.salesInvoice)}&dn=${encodeURIComponent(name)}`)}>
                     {t("inv.receive")}
                   </button>
                 )}
-                {submitted && !data.is_return && (
+                {submitted && !data.is_return && outstanding > 0 && (
+                  <button type="button" className="btn ghost" disabled={paymentRequest.busy}
+                    onClick={() => void paymentRequest.open(() => makePayReq.call({ reference_doctype: DT.salesInvoice, reference_name: name }))}>
+                    Payment Request
+                  </button>
+                )}
+                {submitted && !data.is_return && !data.update_stock && !(data.items ?? []).some((row) => row.is_delivered_by_supplier)
+                  && (data.items ?? []).some((row) => Number(row.qty) - Number(row.delivered_qty || 0) > 0 && !row.scio_detail && !row.dn_detail && !row.delivered_by_supplier) && (
+                  <button className="btn ghost" disabled={makeDn.loading} onClick={() => void createDelivery()}>
+                    {t("sod.createDn")}
+                  </button>
+                )}
+                {submitted && !data.is_return && (outstanding >= 0 || Math.abs(outstanding) < grand) && (
                   <button className="btn ghost" onClick={() => nav(`/invoices/${encodeURIComponent(name)}/return`)}>
                     {t("inv.credit")}
                   </button>

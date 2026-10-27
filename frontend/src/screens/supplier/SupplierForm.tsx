@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { DT } from "../../lib/frappe";
+import { useFrappePostCall } from "frappe-react-sdk";
+import { DT, METHOD } from "../../lib/frappe";
+import { useOpenMapped } from "../../lib/openMapped";
 import { useDoc, useDocList, useInsert, useSave } from "../../lib/resource";
 import { UAE_EMIRATES } from "../../types/uae";
 import { t } from "../../i18n/strings";
@@ -63,6 +65,8 @@ export default function SupplierForm() {
   const terms = useDocList<{ name: string }>(DT.paymentTerms, { fields: ["name"], limit: 50 });
   const create = useInsert();
   const update = useSave();
+  const makeRfq = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeSupplierRfq);
+  const rfq = useOpenMapped("/request-for-quotations");
 
   const [form, setForm] = useState({
     supplier_name: "",
@@ -223,6 +227,14 @@ export default function SupplierForm() {
         actions={
           <>
             {!isNew ? (<DocHistory doctype={DT.supplier} name={name} />) : null}
+            {!isNew ? (
+              <>
+                <button type="button" className="btn ghost" onClick={() => nav("/purchase-orders/new", { state: { mapped: { supplier: name } } })}>{t("nav.purchaseOrders")}</button>
+                <button type="button" className="btn ghost" onClick={() => nav("/purchase-invoices/new", { state: { mapped: { supplier: name } } })}>{t("nav.purchaseInvoices")}</button>
+                <button type="button" className="btn ghost" onClick={() => nav("/supplier-quotations/new", { state: { mapped: { supplier: name } } })}>{t("nav.supplierQuotations")}</button>
+                <button type="button" className="btn ghost" disabled={rfq.busy} onClick={() => void rfq.open(() => makeRfq.call({ supplier: name }))}>Request for Quotation</button>
+              </>
+            ) : null}
 
             <button type="button" className="btn ghost" onClick={() => nav("/suppliers")}>{t("soc.discard")}</button>
             <button type="button" className="btn" disabled={busy || !ready} onClick={() => void save()}>
@@ -231,7 +243,7 @@ export default function SupplierForm() {
           </>
         }
       />
-      {saveError && <ErrorBox error={saveError} />}
+      {(saveError || rfq.error) && <ErrorBox error={saveError || rfq.error} />}
 
       <Card num={1} title={t("cust.identity")}>
         <div className="grid2">

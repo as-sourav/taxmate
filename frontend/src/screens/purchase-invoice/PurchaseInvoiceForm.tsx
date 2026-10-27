@@ -2,7 +2,7 @@
  * Purchase Invoice create/edit. Catalog txn helpers + get-items-from.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
@@ -10,7 +10,7 @@ import { useDoc, useDocList, useInsert, useSave } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canSubmitSales } from "../../lib/roles";
 import { money, parseNum, toIsoDate } from "../../lib/format";
-import { applyLineRate, linePayload, orderDiscountFields, productDiscountTotal, readDiscountBasis, stampItemDetails, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type DiscountBasis, type PartyDetails, type TxnLine } from "../../lib/txn";
+import { applyLineRate, linePayload, mappedItem, orderDiscountFields, productDiscountTotal, readDiscountBasis, stampItemDetails, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type DiscountBasis, type PartyDetails, type TxnLine } from "../../lib/txn";
 import { LineDiscountInput, LineTrack, OrderDiscountFields, PartyFields, PaymentScheduleTable, TxnTotals } from "../../components/txnFields";
 import { UAE_EMIRATES } from "../../types/uae";
 import { t } from "../../i18n/strings";
@@ -52,6 +52,7 @@ export default function PurchaseInvoiceForm() {
   const nav = useNavigate();
   const session = useSession();
   const isNew = name === "new";
+  const location = useLocation();
   const existing = useDoc<InvoiceDoc>(DT.purchaseInvoice, isNew ? undefined : name, isNew ? null : name, {
     isPaused: () => isNew,
   });
@@ -63,6 +64,11 @@ export default function PurchaseInvoiceForm() {
   const terms = useDocList<{ name: string }>(DT.paymentTerms, { fields: ["name"], limit: 50 });
 
   const [supplier, setSupplier] = useState("");
+  useEffect(() => {
+    if (!isNew) return;
+    const mapped = (location.state as { mapped?: { supplier?: string } } | null)?.mapped;
+    if (mapped?.supplier) setSupplier(mapped.supplier);
+  }, [isNew, location.state]);
   const [postingDate, setPostingDate] = useState(toIsoDate(new Date()));
   const [dueDate, setDueDate] = useState("");
   const [billNo, setBillNo] = useState("");
@@ -111,14 +117,7 @@ export default function PurchaseInvoiceForm() {
     setConversionRate(Number(d.conversion_rate) || 1);
     setUpdateStock(!!d.update_stock);
     setSetWarehouse(d.set_warehouse || "");
-    setLines((d.items ?? []).map((l) => ({
-      item_code: l.item_code, item_name: l.item_name, description: l.description,
-      qty: l.qty, rate: l.rate, uom: l.uom, expense_account: l.expense_account,
-      price_list_rate: l.price_list_rate, discount_percentage: l.discount_percentage, discount_amount: l.discount_amount,
-      cost_center: l.cost_center, item_tax_template: l.item_tax_template,
-      uae_item_type: l.uae_item_type, hs_code: l.hs_code, sac_code: l.sac_code,
-      warehouse: l.warehouse || d.set_warehouse || "",
-    })));
+    setLines((d.items ?? []).map((l) => mappedItem(l, d.set_warehouse || "")));
     setSkipReprice(true);
   }, [existing.data]);
 
@@ -187,13 +186,10 @@ export default function PurchaseInvoiceForm() {
     if (mapped.taxes_and_charges) setTaxTemplate(String(mapped.taxes_and_charges));
     if (mapped.bill_no) setBillNo(String(mapped.bill_no));
     if (mapped.bill_date) setBillDate(String(mapped.bill_date));
+    if (mapped.update_stock != null) setUpdateStock(!!mapped.update_stock);
+    if (mapped.set_warehouse) setSetWarehouse(String(mapped.set_warehouse));
     const items = (mapped.items as TxnLine[] | undefined) ?? [];
-    setLines(items.map((l) => ({
-      item_code: l.item_code || "", item_name: l.item_name,
-      qty: Number(l.qty) || 1, rate: Number(l.rate) || 0, uom: l.uom,
-      expense_account: l.expense_account, cost_center: l.cost_center,
-      uae_item_type: l.uae_item_type, hs_code: l.hs_code, sac_code: l.sac_code,
-    })));
+    setLines(items.map((l) => mappedItem(l, String(mapped.set_warehouse || ""))));
   }
 
   const buildPreviewDoc = useCallback(() => {
@@ -219,7 +215,7 @@ export default function PurchaseInvoiceForm() {
         price_list_rate: l.price_list_rate, discount_percentage: l.discount_percentage, discount_amount: l.discount_amount,
         expense_account: l.expense_account, cost_center: l.cost_center,
         item_tax_template: l.item_tax_template,
-        warehouse: updateStock ? (l.warehouse || setWarehouse || undefined) : undefined,
+        warehouse: l.warehouse || (updateStock ? setWarehouse || undefined : undefined),
       })),
     };
   }, [supplier, postingDate, dueDate, company, emirate, taxTemplate, paymentTerms, party, companyDefaults, session.currency, discountPct, discountOn, lines, currency, conversionRate, companyCurrency, updateStock, setWarehouse]);
@@ -275,7 +271,7 @@ export default function PurchaseInvoiceForm() {
         : undefined,
       items: lines.map((l) => ({
         ...linePayload(l),
-        warehouse: updateStock ? (l.warehouse || setWarehouse || undefined) : undefined,
+        warehouse: l.warehouse || (updateStock ? setWarehouse || undefined : undefined),
       })),
     };
   }
@@ -364,8 +360,16 @@ export default function PurchaseInvoiceForm() {
           <Card title={t("txn.getItemsFrom")}>
             <SourceDocPicker
               sources={[
-                { label: t("nav.purchaseOrders"), doctype: DT.purchaseOrder, method: METHOD.makePurchaseInvoice, arg: "source_name" },
-                { label: t("nav.purchaseReceipts"), doctype: DT.purchaseReceipt, method: METHOD.makePrPurchaseInvoice, arg: "source_name" },
+                {
+                  label: t("nav.purchaseOrders"), doctype: DT.purchaseOrder,
+                  method: METHOD.makePurchaseInvoice, arg: "source_name",
+                  filters: [["docstatus", "=", 1], ["status", "not in", ["Closed", "On Hold"]], ["per_billed", "<", 99.99]],
+                },
+                {
+                  label: t("nav.purchaseReceipts"), doctype: DT.purchaseReceipt,
+                  method: METHOD.makePrPurchaseInvoice, arg: "source_name",
+                  filters: [["docstatus", "=", 1], ["is_return", "=", 0], ["status", "not in", ["Closed", "Completed", "Return Issued"]]],
+                },
               ]}
               onMapped={applyMapped}
             />

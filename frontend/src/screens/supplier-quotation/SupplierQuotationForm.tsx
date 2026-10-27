@@ -3,7 +3,8 @@
  * Routes: /supplier-quotations/new, /supplier-quotations/:name/edit
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import SourceDocPicker from "../../components/SourceDocPicker";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
@@ -30,11 +31,21 @@ export default function SupplierQuotationForm() {
   const nav = useNavigate();
   const session = useSession();
   const canSubmit = canSubmitSales(session.roles);
+  const location = useLocation();
   const { name: editName } = useParams<{ name?: string }>();
   const isEdit = !!editName;
   const company = session.company;
 
   const [supplier, setSupplier] = useState("");
+  useEffect(() => {
+    if (isEdit) return;
+    const mapped = (location.state as { mapped?: { supplier?: string } } | null)?.mapped;
+    if (mapped?.supplier) setSupplier(String(mapped.supplier));
+    const items = (mapped && "items" in mapped ? (mapped as { items?: { item_code?: string; qty?: number; rate?: number; uom?: string }[] }).items : undefined) ?? [];
+    if (items.length) {
+      setLines(items.map((row) => ({ item_code: row.item_code || "", qty: Number(row.qty) || 1, rate: Number(row.rate) || 0, uom: row.uom })));
+    }
+  }, [isEdit, location.state]);
   const [transDate, setTransDate] = useState(today);
   const [validTill, setValidTill] = useState(plus(30));
   const [taxTemplate, setTaxTemplate] = useState("");
@@ -222,6 +233,24 @@ export default function SupplierQuotationForm() {
           </Card>
         }
       >
+        {!isEdit && (
+          <Card title={t("txn.getItemsFrom")}>
+            <SourceDocPicker
+              sources={[{
+                label: t("nav.materialRequests"),
+                doctype: DT.materialRequest,
+                method: METHOD.makeMrSupplierQuotation,
+                arg: "source_name",
+                filters: [["docstatus", "=", 1], ["material_request_type", "=", "Purchase"], ["status", "!=", "Stopped"], ["per_ordered", "<", 100]],
+              }]}
+              onMapped={(mapped) => {
+                if (mapped.supplier) setSupplier(String(mapped.supplier));
+                const items = (mapped.items as { item_code?: string; qty?: number; rate?: number; uom?: string }[] | undefined) ?? [];
+                if (items.length) setLines(items.map((row) => ({ item_code: row.item_code || "", qty: Number(row.qty) || 1, rate: Number(row.rate) || 0, uom: row.uom })));
+              }}
+            />
+          </Card>
+        )}
         <Card title={t("sq.details")}>
           <div className="fg">
             <Field label={t("sq.col.supplier")} required>

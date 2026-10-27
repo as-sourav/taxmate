@@ -11,7 +11,7 @@ import { useDoc, useDocList, useInsert, useSave } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canSubmitSales, canWrite } from "../../lib/roles";
 import { money, parseNum, toIsoDate } from "../../lib/format";
-import { applyLineRate, linePayload, orderDiscountFields, productDiscountTotal, readDiscountBasis, stampItemDetails, useItemQtyCheck, useTotalsPreview, useTransactionRpc, type DiscountBasis, type PartyDetails, type TxnLine } from "../../lib/txn";
+import { applyLineRate, linePayload, mappedItem, orderDiscountFields, productDiscountTotal, readDiscountBasis, stampItemDetails, useItemQtyCheck, useTotalsPreview, useTransactionRpc, type DiscountBasis, type PartyDetails, type TxnLine } from "../../lib/txn";
 import { ExchangeRateField, LineDiscountInput, LineTrack, OrderDiscountFields, PartyFields, TxnTotals } from "../../components/txnFields";
 import { UAE_EMIRATES } from "../../types/uae";
 import { t } from "../../i18n/strings";
@@ -89,19 +89,7 @@ export default function DeliveryNoteForm() {
     setEmirate(d.vat_emirate || "");
     setLines(
       (d.items ?? []).length
-        ? (d.items ?? []).map((row) => ({
-            item_code: row.item_code || "",
-            item_name: row.item_name,
-            uom: row.uom,
-            qty: Number(row.qty) || 1,
-            rate: Number(row.rate) || 0,
-            price_list_rate: row.price_list_rate,
-            discount_percentage: row.discount_percentage,
-            discount_amount: row.discount_amount,
-            warehouse: row.warehouse || d.set_warehouse || "",
-            batch_no: row.batch_no || "",
-            serial_no: row.serial_no || "",
-          }))
+        ? (d.items ?? []).map((row) => mappedItem(row, d.set_warehouse || ""))
         : [{ item_code: "", qty: 1, rate: 0 }],
     );
     setSkipReprice(true);
@@ -151,18 +139,7 @@ export default function DeliveryNoteForm() {
     if (mapped.vat_emirate) setEmirate(String(mapped.vat_emirate));
     if (mapped.taxes_and_charges) setTaxTemplate(String(mapped.taxes_and_charges));
     const items = (mapped.items as Line[] | undefined) ?? [];
-    setLines(
-      items.map((l) => ({
-        item_code: l.item_code || "",
-        item_name: l.item_name,
-        qty: Number(l.qty) || 1,
-        rate: Number(l.rate) || 0,
-        uom: l.uom,
-        warehouse: l.warehouse || String(mapped.set_warehouse || ""),
-        batch_no: l.batch_no,
-        serial_no: l.serial_no,
-      })),
-    );
+    setLines(items.map((l) => mappedItem(l, String(mapped.set_warehouse || ""))));
   }
 
   const buildPreviewDoc = useCallback(() => {
@@ -316,7 +293,8 @@ export default function DeliveryNoteForm() {
           <Card title={t("txn.getItemsFrom")}>
             <SourceDocPicker
               sources={[
-                { label: t("nav.salesOrders"), doctype: DT.salesOrder, method: METHOD.makeDeliveryNote, arg: "source_name" },
+                { label: t("nav.salesOrders"), doctype: DT.salesOrder, method: METHOD.makeDeliveryNote, arg: "source_name",
+                  filters: [["docstatus", "=", 1], ["status", "not in", ["Closed", "On Hold"]], ["per_delivered", "<", 99.99]] },
               ]}
               onMapped={applyMapped}
             />

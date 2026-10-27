@@ -102,7 +102,8 @@ export default function PaymentForm() {
   const session = useSession();
   const isNew = name === "new";
 
-  const invoice = params.get("invoice") || "";
+  const invoice = params.get("dn") || params.get("invoice") || "";
+  const sourceDoctype = params.get("dt") || "";
   const urlParty = params.get("party") || "";
   const urlType = (params.get("type") === "Pay" ? "Pay" : "Receive") as PayType;
 
@@ -211,7 +212,7 @@ export default function PaymentForm() {
     let cancelled = false;
     void (async () => {
       try {
-        const source = urlType === "Pay" ? DT.purchaseInvoice : DT.salesInvoice;
+        const source = sourceDoctype || (urlType === "Pay" ? DT.purchaseInvoice : DT.salesInvoice);
         const next = await seedFrom(source, invoice, { posting_date: toIsoDate(new Date()) });
         if (cancelled) return;
         setDoc(next);

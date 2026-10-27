@@ -17,6 +17,8 @@ export type SourceSpec = {
   method: string;
   /** Mapper argument name, usually source_name */
   arg?: string;
+  /** Desk get-items filters. Defaults to submitted documents. */
+  filters?: unknown;
 };
 
 type Props = {
@@ -116,7 +118,7 @@ export default function SourceDocPicker({ sources, onMapped, disabled }: Props) 
             setErr(null);
           }}
           disabled={disabled}
-          filters={[["docstatus", "=", 1]]}
+          filters={src.filters ?? [["docstatus", "=", 1]]}
         />
       </Field>
       {src ? (

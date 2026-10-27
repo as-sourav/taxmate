@@ -6,6 +6,7 @@ import {
 
 import type { SalesOrder, SalesOrderItem } from "../../types/erpnext";
 import { DT, METHOD } from "../../lib/frappe";
+import { useOpenMapped } from "../../lib/openMapped";
 import { useDoc, useInsert } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canCancelSales, canSubmitSales, canWrite } from "../../lib/roles";
@@ -17,12 +18,18 @@ import { productDiscountTotal, readDiscountBasis } from "../../lib/txn";
 import { Card, ErrorBox, Loading, MiniBar, PageHead, Pill, ReadRow, SumRow } from "../../components/ui";
 import { FormLayout } from "../../components/form";
 import DetailActions from "../../components/DetailActions";
+import UpdateItems from "../../components/UpdateItems";
+import LinkField from "../../components/LinkField";
 import LineItems, { type LineField } from "../../components/LineItems";
 import { useDeleteDraftAction } from "../../lib/useDraftDelete";
 import { printDocUrl } from "../../lib/printDoc";
 import { isNative } from "../../mobile/platform";
 
 type Doc = SalesOrder & { items: SalesOrderItem[] };
+type WoRow = {
+  item_code?: string; item_name?: string; bom?: string; pending_qty?: number;
+  sales_order_item?: string; warehouse?: string; description?: string; selected?: boolean;
+};
 
 export default function SalesOrderDetail() {
   const { name = "" } = useParams();
@@ -50,12 +57,24 @@ export default function SalesOrderDetail() {
   const submitCall = useFrappePostCall(METHOD.submit);
   const cancelCall = useFrappePostCall(METHOD.cancel);
   const amendCall = useFrappePostCall<{ message: { name: string } }>(METHOD.amend);
+  const setStatus = useFrappePostCall(METHOD.setSalesOrderStatus);
+  const makePick = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeSalesOrderPickList);
+  const makeMr = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeSalesOrderMaterialRequest);
+  const makePayReq = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makePaymentRequest);
+  const makeInward = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeSubcontractingInward);
+  const paymentRequest = useOpenMapped("/payment-requests");
+  const inward = useOpenMapped("/subcontracting-inward-orders");
+  const makeWo = useFrappePostCall<{ message: { names?: string[] } }>(METHOD.makeSalesOrderWorkOrders);
+  const loadWo = useFrappePostCall<{ message: { items?: WoRow[] } }>(METHOD.salesOrderWorkOrderItems);
   const create = useInsert();
   const session = useSession();
   const canSubmit = canSubmitSales(session.roles);
   const canCancel = canCancelSales(session.roles);
   const [busy, setBusy] = useState<"" | "dn" | "si">("");
   const [mapError, setMapError] = useState<unknown>(null);
+  const [holdReason, setHoldReason] = useState("");
+  const [statusError, setStatusError] = useState<unknown>(null);
+  const [woRows, setWoRows] = useState<WoRow[] | null>(null);
 
   async function createDownstream(kind: "dn" | "si") {
     setBusy(kind);
@@ -84,11 +103,105 @@ export default function SalesOrderDetail() {
     }
   }
 
+  async function mapDraft(
+    call: (args: { source_name: string }) => Promise<{ message?: Record<string, unknown> } | undefined>,
+    doctype: string,
+    path: string,
+  ) {
+    setBusy("dn");
+    setMapError(null);
+    try {
+      const res = await call({ source_name: name });
+      const mapped = res?.message;
+      if (!mapped) throw new Error(t("doc.err.mapFailed"));
+      const body: Record<string, unknown> = { ...mapped };
+      delete body.name;
+      delete body.doctype;
+      delete body.__islocal;
+      delete body.__unsaved;
+      const created = await create.createDoc(doctype, body) as { name: string };
+      nav(`${path}${encodeURIComponent(created.name)}`);
+    } catch (err) {
+      setMapError(err);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function openWorkOrders() {
+    setBusy("dn");
+    setMapError(null);
+    try {
+      const res = await loadWo.call({ source_name: name });
+      const items = res?.message?.items ?? [];
+      if (!items.length) throw new Error(t("doc.err.mapFailed"));
+      setWoRows(items.map((row) => ({ ...row, selected: true })));
+    } catch (err) {
+      setMapError(err);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function confirmWorkOrders() {
+    const chosen = (woRows ?? []).filter((row) => row.selected && row.bom && Number(row.pending_qty) > 0);
+    if (!chosen.length) {
+      setMapError(new Error(t("doc.err.mapFailed")));
+      return;
+    }
+    setBusy("dn");
+    setMapError(null);
+    try {
+      const res = await makeWo.call({ source_name: name, items: chosen });
+      const next = res?.message?.names?.[0];
+      if (!next) throw new Error(t("doc.err.mapFailed"));
+      setWoRows(null);
+      nav(`/work-orders/${encodeURIComponent(next)}`);
+    } catch (err) {
+      setMapError(err);
+    } finally {
+      setBusy("");
+    }
+  }
+
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={() => mutate()} />;
   if (!data) return null;
 
   const ui = toUiStatus(data.status);
+  const lines = data.items ?? [];
+  const held = data.status === "On Hold";
+  const closed = data.status === "Closed";
+  const stillOpen = (data.per_delivered ?? 0) < 100 || (data.per_billed ?? 0) < 100;
+  const deliverable = !!data.has_unit_price_items || lines.some((row) => (
+    !row.delivered_by_supplier && Number(row.qty) > Number(row.delivered_qty || 0)
+  ));
+  const canDeliver = data.docstatus === 1 && !held && !closed && data.order_type !== "Maintenance"
+    && !data.skip_delivery_note && (data.per_delivered ?? 0) < 100 && deliverable;
+  const canBill = data.docstatus === 1 && !held && !closed
+    && ((data.per_billed ?? 0) < 100 || !!data.is_subcontracted);
+  const canPay = data.docstatus === 1 && !closed && (data.per_billed ?? 0) < 100;
+  const canPick = data.docstatus === 1 && !held && !closed && !data.is_subcontracted
+    && (data.per_picked ?? 0) < 100 && (data.per_delivered ?? 0) < 100;
+  const canRequest = data.docstatus === 1 && !held && !closed && !data.is_subcontracted
+    && data.order_type !== "Maintenance" && (!data.order_type || (data.per_delivered ?? 0) < 100);
+  const canMakeWork = canDeliver && !data.is_subcontracted;
+  const canUpdate = data.docstatus === 1 && data.status !== "Closed" && data.status !== "Completed"
+    && (data.per_delivered ?? 0) < 100 && (data.per_billed ?? 0) < 100;
+  const canHoldOrClose = canSubmit && data.docstatus === 1 && !closed && stillOpen;
+  const canResume = canSubmit && data.docstatus === 1 && held;
+  const canReopen = canSubmit && data.docstatus === 1 && closed;
+
+  async function changeStatus(status: string, reason?: string) {
+    setStatusError(null);
+    try {
+      await setStatus.call({ name, status, reason });
+      setHoldReason("");
+      await mutate();
+    } catch (err) {
+      setStatusError(err);
+    }
+  }
   const late = isLate(data);
   const vat = data.total_taxes_and_charges ?? 0;
   const net = data.net_total ?? 0;
@@ -140,22 +253,78 @@ export default function SalesOrderDetail() {
                   {t("inv.print")}
                 </button>
                 )}
-                {/* Same gate ERPNext's own buttons use: at 100% every row's
-                    mapper condition is false and the result has no items.   */}
-                <button type="button" className="btn ghost"
-                  disabled={!!busy || data.docstatus !== 1 || (data.per_delivered ?? 0) >= 100}
+                {canDeliver && (
+                <button type="button" className="btn ghost" disabled={!!busy}
                   onClick={() => void createDownstream("dn")}>
                   {busy === "dn" ? t("soc.saving") : t("sod.createDn")}
                 </button>
-                <button type="button" className="btn"
-                  disabled={!!busy || data.docstatus !== 1 || (data.per_billed ?? 0) >= 100}
+                )}
+                {canBill && (
+                <button type="button" className="btn" disabled={!!busy}
                   onClick={() => void createDownstream("si")}>
                   {busy === "si" ? t("soc.saving") : t("sod.createSi")}
                 </button>
-                {data.docstatus === 1 && (
+                )}
+                {canPick && (
+                  <button type="button" className="btn ghost" disabled={!!busy} onClick={() => void mapDraft(makePick.call, DT.pickList, "/pick-lists/")}>
+                    {t("nav.pickLists")}
+                  </button>
+                )}
+                {canRequest && (
+                  <button type="button" className="btn ghost" disabled={!!busy} onClick={() => void mapDraft(makeMr.call, DT.materialRequest, "/material-requests/")}>
+                    {t("nav.materialRequests")}
+                  </button>
+                )}
+                {canMakeWork && (
+                  <button type="button" className="btn ghost" disabled={!!busy} onClick={() => void openWorkOrders()}>
+                    {t("nav.workOrders")}
+                  </button>
+                )}
+                {canPay && (
                   <button type="button" className="btn ghost"
-                    onClick={() => nav(`/payments/new?type=Receive&party=${encodeURIComponent(data.customer || "")}`)}>
+                    onClick={() => nav(`/payments/new?dt=${encodeURIComponent(DT.salesOrder)}&dn=${encodeURIComponent(name)}`)}>
                     {t("sod.createPayment")}
+                  </button>
+                )}
+                {data.docstatus === 1 && !closed && (data.per_billed ?? 0) < 100 && (
+                  <button type="button" className="btn ghost" disabled={paymentRequest.busy}
+                    onClick={() => void paymentRequest.open(() => makePayReq.call({ reference_doctype: DT.salesOrder, reference_name: name }))}>
+                    Payment Request
+                  </button>
+                )}
+                {data.docstatus === 1 && !held && !closed && !!data.is_subcontracted
+                  && (data.items ?? []).some((row) => Number(row.qty) !== Number(row.subcontracted_qty || 0)) && (
+                  <button type="button" className="btn ghost" disabled={inward.busy}
+                    onClick={() => void inward.open(() => makeInward.call({ source_name: name }))}>
+                    Subcontracting Inward Order
+                  </button>
+                )}
+                {canHoldOrClose && !held && (
+                  <>
+                    <input className="ctl" value={holdReason} aria-label="Reason for hold"
+                      onChange={(event) => setHoldReason(event.target.value)} />
+                    <button type="button" className="btn ghost" disabled={setStatus.loading || !holdReason.trim()}
+                      onClick={() => void changeStatus("On Hold", holdReason)}>
+                      {t("supp.onHold")}
+                    </button>
+                  </>
+                )}
+                {canResume && (
+                  <button type="button" className="btn ghost" disabled={setStatus.loading}
+                    onClick={() => void changeStatus("Draft")}>
+                    Resume
+                  </button>
+                )}
+                {canHoldOrClose && (
+                  <button type="button" className="btn ghost" disabled={setStatus.loading}
+                    onClick={() => void changeStatus("Closed")}>
+                    {t("hist.close")}
+                  </button>
+                )}
+                {canReopen && (
+                  <button type="button" className="btn ghost" disabled={setStatus.loading}
+                    onClick={() => void changeStatus("Draft")}>
+                    Re-open
                   </button>
                 )}
               </>
@@ -170,8 +339,8 @@ export default function SalesOrderDetail() {
         </p>
       </PageHead>
 
-      {(mapError || makeDn.error || makeSi.error) && (
-        <ErrorBox error={submitCall.error ?? cancelCall.error ?? amendCall.error ?? mapError ?? makeDn.error ?? makeSi.error} />
+      {(mapError || statusError || makeDn.error || makeSi.error || paymentRequest.error || inward.error) && (
+        <ErrorBox error={submitCall.error ?? cancelCall.error ?? amendCall.error ?? statusError ?? mapError ?? makeDn.error ?? makeSi.error ?? paymentRequest.error ?? inward.error} />
       )}
 
       <Card bodyClass="steps">
@@ -246,6 +415,28 @@ export default function SalesOrderDetail() {
               its form — and collapse={false} so delivery progress and the
               remaining quantity stay on the card, which is most of why anyone
               opens this screen on a phone. */}
+          {woRows && (
+            <Card title={t("nav.workOrders")}>
+              {woRows.map((row, index) => (
+                <div key={row.sales_order_item || index} className="grid3" style={{ marginBottom: 8 }}>
+                  <label className="ctl">
+                    <input type="checkbox" checked={!!row.selected} aria-label={row.item_code || "Item"}
+                      onChange={(event) => setWoRows((current) => (current ?? []).map((item, i) => i === index ? { ...item, selected: event.target.checked } : item))} />
+                    {" "}{row.item_code}
+                  </label>
+                  <LinkField doctype="BOM" value={row.bom || ""} filters={row.item_code ? [["item", "=", row.item_code], ["is_active", "=", 1]] : undefined}
+                    onChange={(bom) => setWoRows((current) => (current ?? []).map((item, i) => i === index ? { ...item, bom } : item))} />
+                  <input className="ctl" type="number" aria-label="Quantity" value={row.pending_qty ?? ""}
+                    onChange={(event) => setWoRows((current) => (current ?? []).map((item, i) => i === index ? { ...item, pending_qty: Number(event.target.value) } : item))} />
+                </div>
+              ))}
+              <button type="button" className="btn" disabled={!!busy} onClick={() => void confirmWorkOrders()}>{t("soc.save")}</button>
+              <button type="button" className="btn ghost" onClick={() => setWoRows(null)}>{t("soc.discard")}</button>
+            </Card>
+          )}
+          {canUpdate && (
+            <UpdateItems doctype={DT.salesOrder} name={name} items={lines} onSaved={() => void mutate()} />
+          )}
           <Card title={t("sod.items")} bodyClass={null}>
             <LineItems<SalesOrderItem>
               rows={data.items ?? []}

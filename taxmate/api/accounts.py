@@ -541,8 +541,22 @@ def preview_taxes_and_totals(doc: dict | str | None = None):
 def make_sales_return(source_name: str):
 	require_login()
 	assert_allowed_doctype("Sales Invoice")
+	if not isinstance(source_name, str) or not source_name.strip():
+		frappe.throw(_("{0} is required").format(_("Sales Invoice")))
+	source_name = source_name.strip()
 	doc = frappe.get_doc("Sales Invoice", source_name)
 	doc.check_permission("read")
+	from frappe.utils import cint, flt
+
+	if cint(doc.docstatus) != 1:
+		frappe.throw(_("Submit the Sales Invoice before creating a return."))
+	if cint(doc.is_return):
+		frappe.throw(_("{0} is already a return document.").format(source_name))
+	outstanding = flt(doc.outstanding_amount)
+	if not (outstanding >= 0 or abs(outstanding) < flt(doc.grand_total)):
+		frappe.throw(_("Nothing left on {0} to return.").format(source_name))
+	if not frappe.has_permission("Sales Invoice", "create"):
+		frappe.throw(_("Not permitted to create {0}").format(_("Sales Invoice")), frappe.PermissionError)
 	from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return as erp_make
 
 	return _as_data(erp_make(source_name))
@@ -552,8 +566,22 @@ def make_sales_return(source_name: str):
 def make_purchase_return(source_name: str):
 	require_login()
 	assert_allowed_doctype("Purchase Invoice")
+	if not isinstance(source_name, str) or not source_name.strip():
+		frappe.throw(_("{0} is required").format(_("Purchase Invoice")))
+	source_name = source_name.strip()
 	doc = frappe.get_doc("Purchase Invoice", source_name)
 	doc.check_permission("read")
+	from frappe.utils import cint, flt
+
+	if cint(doc.docstatus) != 1:
+		frappe.throw(_("Submit the Purchase Invoice before creating a return."))
+	if cint(doc.is_return):
+		frappe.throw(_("{0} is already a return document.").format(source_name))
+	outstanding = flt(doc.outstanding_amount)
+	if not (outstanding >= 0 or abs(outstanding) < flt(doc.grand_total)):
+		frappe.throw(_("Nothing left on {0} to return.").format(source_name))
+	if not frappe.has_permission("Purchase Invoice", "create"):
+		frappe.throw(_("Not permitted to create {0}").format(_("Purchase Invoice")), frappe.PermissionError)
 	from erpnext.accounts.doctype.purchase_invoice.purchase_invoice import make_debit_note
 
 	return _as_data(make_debit_note(source_name))
@@ -745,3 +773,66 @@ def resolve_internal_transfer_accounts(company: str, mode_of_payment: str) -> di
 		"paid_to_account_currency": bank.get("account_currency"),
 		"bank_account_type": bank.get("account_type"),
 	}
+
+
+_UPDATE_ITEMS = ("Sales Order", "Purchase Order", "Quotation", "Supplier Quotation")
+
+
+@frappe.whitelist(methods=["POST"])
+def update_items(doctype: str, name: str, items) -> dict[str, str]:
+	"""Update qty and rate on a submitted order or quotation the way Desk's Update Items does."""
+	require_login()
+	if doctype not in _UPDATE_ITEMS:
+		frappe.throw(_("That document cannot be updated this way."))
+	assert_allowed_doctype(doctype)
+	if not isinstance(name, str) or not name.strip():
+		frappe.throw(_("{0} is required").format(_(doctype)))
+	name = name.strip()
+	if isinstance(items, str):
+		items = frappe.parse_json(items)
+	if not isinstance(items, list) or not items:
+		frappe.throw(_("Items are required"))
+	doc = frappe.get_doc(doctype, name)
+	doc.check_permission("write")
+	from frappe.utils import cint, flt
+
+	if doctype in ("Sales Order", "Purchase Order") and not doc.can_update_items():
+		frappe.throw(_("Items cannot be updated because a subcontracting order already exists."))
+	if doctype == "Sales Order":
+		if (
+			cint(doc.docstatus) != 1
+			or doc.status in ("Closed", "Completed")
+			or flt(doc.per_delivered) >= 100
+			or flt(doc.per_billed) >= 100
+		):
+			frappe.throw(_("{0} {1} is {2}.").format(_(doctype), name, _(doc.status or "")))
+	elif doctype == "Purchase Order":
+		if (
+			cint(doc.docstatus) != 1
+			or doc.status in ("Closed", "Delivered")
+			or flt(doc.per_received) >= 100
+			or flt(doc.per_billed) >= 100
+		):
+			frappe.throw(_("{0} {1} is {2}.").format(_(doctype), name, _(doc.status or "")))
+	elif cint(doc.docstatus) != 1 or doc.status in ("Lost", "Ordered"):
+		frappe.throw(_("{0} {1} is {2}.").format(_(doctype), name, _(doc.status or "")))
+	import json
+
+	from erpnext.controllers.accounts_controller import update_child_qty_rate
+
+	update_child_qty_rate(doctype, json.dumps(items), name, "items")
+	return {"name": name, "status": frappe.db.get_value(doctype, name, "status")}
+
+
+@frappe.whitelist()
+def can_update_items(doctype: str, name: str) -> dict[str, int]:
+	"""Whether Desk would still offer Update Items for this submitted order."""
+	require_login()
+	if doctype not in ("Sales Order", "Purchase Order"):
+		return {"allowed": 1}
+	assert_allowed_doctype(doctype)
+	if not isinstance(name, str) or not name.strip():
+		frappe.throw(_("{0} is required").format(_(doctype)))
+	doc = frappe.get_doc(doctype, name.strip())
+	doc.check_permission("read")
+	return {"allowed": 1 if doc.can_update_items() else 0}
