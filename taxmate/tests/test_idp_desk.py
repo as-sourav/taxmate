@@ -951,3 +951,427 @@ class TestGulfDairyPurchaseScan(unittest.TestCase):
 		self.assertEqual(items[9]["item_name"], "Mango Juice 1 L")
 		self.assertEqual(items[9]["uom"], "Btl")
 		self.assertEqual(items[9]["qty"], 120)
+
+
+NAHAR_RECEIPT = """
+NAHAR W LAIL MINIMART
+FRESH MARKET MINIMART
+SHOP NO:1 CITADEL TOWER
+BUSINESS BAY, DUBAI - U.A.E
+TEL: 04 368 6868 ,052 7153 808
+TRN : 100376117600003
+TAX INVOICE
+Date Time / تاريخ : 26/10/2026 17:36:55
+Invoice # / فاتورة : 165847
+SL Commodity Price Qty Amt
+1 Al Rawabi Long Life 2.50 1.00 2.50
+Fruit Cocktail Juice -
+no added sugar 200 ml
+6291030003817
+2 Galaxy Strawberry 4.00 1.00 4.00
+Chocolate Bar 36 gr
+6285835000171
+Net Amount 6.50
+VAT% Sub Total Excl. VAT VAT VAT Incl
+5.00 6.19 0.31 6.50
+"""
+
+
+class TestRetailReceiptScan(unittest.TestCase):
+	def test_price_qty_columns_and_printed_vat(self):
+		from taxmate.idp.masters import salvage_from_ocr_text
+
+		extracted = {
+			"success": True,
+			"ocr_text": NAHAR_RECEIPT,
+			"extracted_data": {
+				"doctype": "Purchase Invoice",
+				"header": {},
+				"items": [
+					{"item_name": "Galaxy Strawberry", "qty": 4, "rate": 1, "amount": 4},
+				],
+			},
+			"validation": {"errors": [], "warnings": [], "missing_masters": []},
+		}
+		salvage_from_ocr_text(extracted, NAHAR_RECEIPT)
+		header = extracted["extracted_data"]["header"]
+		items = extracted["extracted_data"]["items"]
+		self.assertEqual(len(items), 2)
+		self.assertIn("Al Rawabi", items[0]["item_name"])
+		self.assertIn("Galaxy", items[1]["item_name"])
+		self.assertEqual(items[0]["qty"], 1)
+		self.assertEqual(items[1]["qty"], 1)
+		self.assertNotEqual(items[0]["rate"], 1)
+		self.assertAlmostEqual(sum(row["amount"] for row in items), 6.19, places=2)
+		self.assertEqual(header["tax_total"], 0.31)
+		self.assertEqual(header["net_total"], 6.19)
+		self.assertEqual(header["grand_total"], 6.50)
+		self.assertEqual(header["bill_no"], "165847")
+		self.assertEqual(header["posting_date"], "2026-10-26")
+		self.assertEqual(header["tax_id"], "100376117600003")
+
+	def test_sale_customer_is_a_field_and_supplier_is_not_saved(self):
+		from taxmate.idp.desk import gaps_from_validation, keep_known_fields, writes_from_extract
+
+		extracted = {
+			"success": True,
+			"extracted_data": {
+				"doctype": "Sales Invoice",
+				"header": {
+					"supplier": "NAHAR W LAIL MINIMART",
+					"posting_date": "2026-10-26",
+					"bill_no": "165847",
+				},
+				"items": [
+					{"item_name": "Galaxy Strawberry", "qty": 1, "rate": 3.81, "amount": 3.81},
+				],
+			},
+			"validation": {
+				"errors": [
+					{"field": "customer", "message": 'Required field "Customer" is missing'},
+					{"field": "item_code", "message": 'Row 1 — Required field "Item" is missing'},
+				],
+				"warnings": [],
+				"missing_masters": [],
+			},
+		}
+		header_in = extracted["extracted_data"]["header"]
+		validation = extracted["validation"]
+		gaps = gaps_from_validation(validation, "Sales Invoice")
+		writes = writes_from_extract(header_in, validation, doctype="Sales Invoice")
+		self.assertNotIn("f.customer", gaps)
+		self.assertIn("customer", [row["field"] for row in writes])
+		self.assertIn("f.customer", gaps_from_validation(validation))
+		header, items = keep_known_fields(
+			extracted["extracted_data"]["header"],
+			extracted["extracted_data"]["items"],
+			{"customer", "posting_date", "currency"},
+			{"item_name", "qty", "rate", "amount"},
+		)
+		self.assertNotIn("supplier", header)
+		self.assertNotIn("bill_no", header)
+		self.assertEqual(items[0]["item_name"], "Galaxy Strawberry")
+		self.assertNotIn("uom", items[0])
+
+
+DUBAI_FRESH = """
+Dubai Fresh Fruits & Vegetables Trading                                                                            TAX INVOICE
+LLC
+Shop 41, Al Aweer Fruit & Vegetable Market, Dubai, UAE                                                             Invoice No: DFV/26/7712
+Tel: +971 4 320 1177                                                                                                Invoice Date: 08/10/2026
+TRN: 100583920600003                                                                                                   Due Date: 15/10/2026
+Bill To
+Olive Grove Kitchen LLC
+TRN: 100512847300003
+#    Description                                                   Qty         UOM           Rate     Taxable Amt      VAT 5%              Total
+1    Tomatoes (Jordan)                                             40            Kg          4.25           170.00         8.50          178.50
+2    Onion Red (India)                                             50            Kg          2.10           105.00         5.25          110.25
+3    Lettuce Iceberg                                               30           Pcs          3.50           105.00         5.25          110.25
+4    Lemon (Egypt)                                                 20            Kg          5.75           115.00         5.75          120.75
+5    Fresh Coriander                                               15        Bunch           1.50            22.50         1.12           23.62
+6    Avocado Hass                                                  10           Box         62.00           620.00       31.00           651.00
+                                                                               Total Taxable Amount                                 1,137.50
+                                                                               VAT @ 5%                                                 56.87
+                                                                               Grand Total (AED)                                   1,194.37
+"""
+
+FACILITY = """
+Emirates Facility Services LLC                                                                                       TAX INVOICE
+Office 1104, Business Bay Tower B, Dubai, UAE                                                                       Invoice No: EFS-0926-118
+Invoice Date: 30/09/2026
+TRN: 100792154300003                                                                                                      Due Date: 30/10/2026
+Bill To
+Al Madina Hypermarket LLC
+TRN: 100398765400003
+#    Description                                                     Qty         UOM           Rate     Taxable Amt       VAT 5%              Total
+1    AC preventive maintenance - September 2026 (store and           1         Month       4,800.00         4,800.00       240.00         5,040.00
+     warehouse)
+2    Deep cleaning - cold storage rooms                              2           Visit     1,250.00         2,500.00       125.00         2,625.00
+3    Pest control service                                            1           Visit       650.00           650.00        32.50           682.50
+4    Replacement filters (call-out)                                  12           Nos         45.00           540.00        27.00           567.00
+                                                                                 Total Taxable Amount                                  8,490.00
+                                                                                 VAT @ 5%                                                 424.50
+                                                                                 Grand Total (AED)                                    8,914.50
+"""
+
+KHALEJ = """
+                                                          TAX INVOICE
+        Al Khaleej Office Supplies LLC | Shop 6, Al Karama Commercial Complex, Dubai, UAE | Tel: +971 4 337 5520 | TRN:
+                                                                100419306800003
+Customer                                                                               Invoice No: AKOS-INV-20931
+Gulfline General Trading LLC                                                           Invoice Date: 08/10/2026
+TRN: 100274639100003                                                                   Due Date: 07/11/2026
+#    Item Code            Description                                  Qty        UOM            Rate     Taxable Amt       VAT 5%             Total
+1    ST-A4-500            A4 Copy Paper 80gsm (Ream 500)               40        Ream           18.50           740.00        37.00          777.00
+2    TN-HP-85A            HP 85A Toner Cartridge (Compatible)          6           Nos        145.00            870.00        43.50          913.50
+3    ST-FILE-LA           Lever Arch File A4                           25          Nos           9.75           243.75        12.19          255.94
+4    ST-PEN-BL            Ball Pen Blue (Box of 50)                    4           Box          32.00           128.00         6.40          134.40
+                                                                                  Total Taxable Amount                                  1,981.75
+                                                                                  VAT @ 5%                                                  99.09
+                                                                                  Grand Total (AED)                                    2,080.84
+"""
+
+GOLD = """
+EMIRATES GOLD TRADING LLC
+Shop 14, Gold Souk, Deira, Dubai, United Arab Emirates
+Tel +971 4 225 7710   |   TRN: 100234567800003
+TAX INVOICE
+Bill To                                                         Invoice No: EGT/2026/0934
+Al Noor Jewellers LLC                                           Invoice Date: 29-Sep-2026
+TRN: 100456789000003                                            Due Date: 29-Oct-2026
+Item Code           Description                                           Qty                Rate        Amount (AED)
+GN-22K-02           22K Gold Necklace (2 g)                                10              300.00               3,000.00
+DR-18K-2CT          Diamond Ring 18K (2 ct)                                  5             500.00               2,500.00
+PKG-BOX             Jewellery Packaging & Gift Box                           1             100.00                 100.00
+                                                                                         Subtotal               5,600.00
+                                                                                          VAT 5%                  280.00
+                                                                                     TOTAL AED                  5,880.00
+"""
+
+
+class TestPurchaseInvoiceLayouts(unittest.TestCase):
+	def _read(self, text: str, items: list | None = None) -> tuple[dict, list]:
+		from taxmate.idp.masters import salvage_from_ocr_text
+
+		extracted = {
+			"success": True,
+			"ocr_text": text,
+			"extracted_data": {
+				"doctype": "Purchase Invoice",
+				"header": {"supplier": "Dubai Fresh Fruits & Vegetables Trading"} if "Dubai Fresh" in text else {},
+				"items": items
+				or [
+					{"item_name": "Tomatoes (Jordan) 40 Kg 4.25", "qty": 170, "rate": 8.5, "amount": 178.5},
+					{"item_name": "Onion Red (India) 50 Kg 2.10", "qty": 105, "rate": 5.25, "amount": 110.25},
+				],
+			},
+		}
+		salvage_from_ocr_text(extracted, text)
+		data = extracted["extracted_data"]
+		return data["header"], data["items"]
+
+	def test_produce_invoice_keeps_qty_uom_and_footer_vat(self):
+		header, items = self._read(DUBAI_FRESH)
+		self.assertEqual(header["supplier"], "Dubai Fresh Fruits & Vegetables Trading LLC")
+		self.assertEqual(header["tax_id"], "100583920600003")
+		self.assertEqual(header["bill_no"], "DFV/26/7712")
+		self.assertEqual(len(items), 6)
+		self.assertEqual(items[0]["item_name"], "Tomatoes (Jordan)")
+		self.assertEqual(items[0]["qty"], 40)
+		self.assertEqual(items[0]["uom"], "Kg")
+		self.assertEqual(items[0]["rate"], 4.25)
+		self.assertEqual(items[0]["amount"], 170)
+		self.assertEqual(items[4]["uom"], "Bunch")
+		self.assertEqual(items[5]["qty"], 10)
+		self.assertEqual(items[5]["uom"], "Box")
+		self.assertEqual(header["net_total"], 1137.50)
+		self.assertEqual(header["tax_total"], 56.87)
+		self.assertEqual(header["grand_total"], 1194.37)
+
+	def test_wrapped_service_line_stays_one_item(self):
+		header, items = self._read(FACILITY, items=[])
+		self.assertEqual(header["supplier"], "Emirates Facility Services LLC")
+		self.assertEqual(header["bill_no"], "EFS-0926-118")
+		self.assertEqual(len(items), 4)
+		from taxmate.idp.masters import promote_unresolved_items
+
+		promote_unresolved_items(items)
+		self.assertIn("warehouse", items[0]["item_name"])
+		self.assertEqual(items[0]["qty"], 1)
+		self.assertEqual(items[0]["uom"], "Month")
+		self.assertEqual(items[0]["rate"], 4800)
+		self.assertEqual(items[0]["amount"], 4800)
+		self.assertEqual(items[1]["qty"], 2)
+		self.assertEqual(items[1]["uom"], "Visit")
+		self.assertEqual(header["tax_total"], 424.50)
+		self.assertEqual(header["grand_total"], 8914.50)
+
+	def test_coded_lines_without_a_discount_column(self):
+		header, items = self._read(KHALEJ, items=[])
+		self.assertEqual(header["supplier"], "Al Khaleej Office Supplies LLC")
+		self.assertEqual(header["tax_id"], "100419306800003")
+		self.assertEqual(header["bill_no"], "AKOS-INV-20931")
+		self.assertEqual(items[0]["item_code"], "ST-A4-500")
+		self.assertEqual(items[0]["qty"], 40)
+		self.assertEqual(items[0]["uom"], "Ream")
+		self.assertEqual(items[0]["rate"], 18.50)
+		self.assertEqual(items[0]["amount"], 740)
+		self.assertEqual(items[1]["item_code"], "TN-HP-85A")
+		self.assertEqual(header["tax_total"], 99.09)
+		self.assertNotEqual(header["tax_id"], "100274639100003")
+
+	def test_gold_invoice_reads_code_qty_rate_and_month_date(self):
+		header, items = self._read(GOLD, items=[{"item_name": "EGT/2026/0934", "qty": 1, "rate": 5600, "amount": 5600}])
+		self.assertEqual(header["supplier"], "EMIRATES GOLD TRADING LLC")
+		self.assertEqual(header["tax_id"], "100234567800003")
+		self.assertEqual(header["bill_no"], "EGT/2026/0934")
+		self.assertEqual(header["posting_date"], "2026-09-29")
+		self.assertEqual(header["due_date"], "2026-10-29")
+		self.assertEqual(len(items), 3)
+		self.assertEqual(items[0]["item_code"], "GN-22K-02")
+		self.assertEqual(items[0]["qty"], 10)
+		self.assertEqual(items[0]["rate"], 300)
+		self.assertEqual(items[0]["amount"], 3000)
+		self.assertEqual(items[2]["item_code"], "PKG-BOX")
+		self.assertEqual(items[2]["qty"], 1)
+		self.assertEqual(header["net_total"], 5600)
+		self.assertEqual(header["tax_total"], 280)
+		self.assertEqual(header["grand_total"], 5880)
+
+	def test_printed_date_is_kept_and_line_discount_becomes_a_net_discount(self):
+		from taxmate.idp.masters import fold_printed_discounts, keep_supplier_invoice_date
+
+		header = {"posting_date": "2026-10-09", "due_date": "2026-11-08"}
+		items = [
+			{"qty": 400, "rate": 5.75, "discount_amount": 115, "amount": 2185},
+			{"qty": 250, "rate": 4.25, "amount": 1062.5},
+		]
+		keep_supplier_invoice_date(header, "Purchase Invoice")
+		fold_printed_discounts(header, items)
+		self.assertEqual(header["set_posting_time"], 1)
+		self.assertEqual(header["bill_date"], "2026-10-09")
+		self.assertEqual(header["discount_amount"], 115)
+		self.assertEqual(header["apply_discount_on"], "Net Total")
+		self.assertNotIn("discount_amount", items[0])
+		self.assertEqual(items[0]["rate"], 5.75)
+
+
+class TestScanCreate(unittest.TestCase):
+	def _clerk(self):
+		import frappe
+
+		email = frappe.db.get_value(
+			"User",
+			{"enabled": 1, "name": ["not in", ["Administrator", "Guest"]]},
+			"name",
+		)
+		self.assertTrue(email)
+		return email
+
+	def test_clerk_who_can_create_the_invoice_can_store_the_scan(self):
+		import frappe
+
+		from taxmate.idp.scan import persist_scan
+
+		email = self._clerk()
+		real = frappe.has_permission
+		real_roles = frappe.get_roles
+		frappe.get_roles = lambda user=None: ["Accounts User"]
+
+		def invoice_only(doctype, ptype="read", *args, **kwargs):
+			if doctype == "IDP Document Log":
+				return False
+			if doctype == "Purchase Invoice" and ptype == "create":
+				return True
+			return real(doctype, ptype, *args, **kwargs)
+
+		frappe.set_user(email)
+		frappe.has_permission = invoice_only
+		name = None
+		try:
+			name = persist_scan(
+				file_url="/private/files/clerk-scan-test.pdf",
+				target_doctype="Purchase Invoice",
+				extracted={},
+				file_sha256_hex=None,
+			)
+			self.assertTrue(frappe.db.exists("IDP Document Log", name))
+		finally:
+			frappe.has_permission = real
+			frappe.get_roles = real_roles
+			frappe.set_user("Administrator")
+			if name:
+				frappe.db.delete("IDP Document Log", {"name": name})
+
+	def test_a_scan_cannot_target_an_unrelated_doctype(self):
+		import frappe
+
+		from taxmate.idp.scan import persist_scan
+
+		with self.assertRaises(frappe.PermissionError):
+			persist_scan(
+				file_url="/private/files/clerk-scan-test.pdf",
+				target_doctype="User",
+				extracted={},
+				file_sha256_hex=None,
+			)
+
+	def test_a_user_who_cannot_create_the_invoice_cannot_store_the_scan(self):
+		import frappe
+
+		from taxmate.idp.scan import persist_scan
+
+		email = self._clerk()
+		real = frappe.has_permission
+		real_roles = frappe.get_roles
+		frappe.set_user(email)
+		frappe.get_roles = lambda user=None: ["Accounts User"]
+		frappe.has_permission = lambda *args, **kwargs: False
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				persist_scan(
+					file_url="/private/files/clerk-scan-test.pdf",
+					target_doctype="Purchase Invoice",
+					extracted={},
+					file_sha256_hex=None,
+				)
+		finally:
+			frappe.has_permission = real
+			frappe.get_roles = real_roles
+			frappe.set_user("Administrator")
+
+	def test_a_blank_page_is_read_from_the_image(self):
+		from idp.extractors.extractor import PDFExtractor
+		from idp.extractors import llm_vision
+
+		extractor = PDFExtractor()
+		extractor._extract_text_pypdf = lambda path: ""
+		extractor._get_page_count = lambda path: 1
+		original = llm_vision.read_pages
+		llm_vision.read_pages = lambda path: "EMIRATES GOLD TRADING LLC\nTRN 100234567800003"
+		try:
+			extraction = extractor.extract("/tmp/blank.pdf")
+		finally:
+			llm_vision.read_pages = original
+		self.assertIn("EMIRATES GOLD TRADING LLC", extraction.text)
+
+	def test_a_text_invoice_is_not_sent_to_the_model(self):
+		from idp.extractors.extractor import PDFExtractor
+		from idp.extractors import llm_vision
+
+		extractor = PDFExtractor()
+		extractor._extract_text_pypdf = lambda path: "TAX INVOICE " * 40
+		extractor._get_page_count = lambda path: 1
+		calls = []
+		original = llm_vision.read_pages
+		llm_vision.read_pages = lambda path: calls.append(path)
+		try:
+			extraction = extractor.extract("/tmp/digital.pdf")
+		finally:
+			llm_vision.read_pages = original
+		self.assertEqual(calls, [])
+		self.assertIn("TAX INVOICE", extraction.text)
+
+	def test_claude_and_openai_receive_their_own_image_blocks(self):
+		from idp.extractors.llm_vision import image_content as _image_content
+
+		class AnthropicProvider:
+			pass
+
+		class OpenAIProvider:
+			pass
+
+		path = "/tmp/taxmate-vision-block.png"
+		with open(path, "wb") as handle:
+			handle.write(b"\x89PNG\r\n")
+		try:
+			claude = _image_content(AnthropicProvider(), path, "read")
+			openai = _image_content(OpenAIProvider(), path, "read")
+		finally:
+			import os
+
+			os.remove(path)
+		self.assertEqual(claude[0]["type"], "image")
+		self.assertEqual(claude[0]["source"]["media_type"], "image/png")
+		self.assertEqual(openai[1]["type"], "image_url")
+		self.assertTrue(openai[1]["image_url"]["url"].startswith("data:image/png;base64,"))

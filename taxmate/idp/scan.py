@@ -13,7 +13,7 @@ import frappe
 
 from taxmate.utils.company import get_default_company
 
-PIPELINE_VERSION = 3  # bump: column items and numeric tax amounts are not masters
+PIPELINE_VERSION = 5  # bump: scanned pages are read by the configured vision model
 SCAN_DOCTYPE = "IDP Document Log"
 # Canonical machine (IDP brief); READY kept as alias for Review.
 REVIEW = "Review"
@@ -96,6 +96,40 @@ def frozen_extracted(doc: Any) -> dict[str, Any]:
 	return data
 
 
+def caller_may_store_scan(target_doctype: str | None) -> bool:
+	"""A clerk who can create the invoice may store the scan that produces it.
+
+	IDP Document Log create is limited to System Manager and IDP User in the
+	DocType itself. Accounts clerks still need a scan row, so the invoice
+	permission is enough. Guests and users who cannot create the target cannot.
+	"""
+	from taxmate.idp.desk import SCAN_DOCTYPES
+
+	if target_doctype not in SCAN_DOCTYPES:
+		return False
+	user = frappe.session.user
+	if user == "Administrator":
+		return True
+	if user == "Guest":
+		return False
+	if "System Manager" in frappe.get_roles(user):
+		return True
+	if frappe.has_permission(SCAN_DOCTYPE, "create", user=user):
+		return True
+	return bool(target_doctype and frappe.has_permission(target_doctype, "create", user=user))
+
+
+def _scan_company() -> str | None:
+	"""Company the signed-in user can actually use, never a stale default."""
+	from taxmate.utils.company import can_use_company, user_companies
+
+	company = get_default_company()
+	if company and can_use_company(company):
+		return company
+	names = user_companies()
+	return names[0] if names else None
+
+
 def persist_scan(
 	*,
 	file_url: str,
@@ -111,7 +145,9 @@ def persist_scan(
 	field_confidence: dict | None = None,
 ) -> str:
 	"""Insert a Scan row with frozen extraction. Returns scan name."""
-	company = get_default_company()
+	if not caller_may_store_scan(target_doctype):
+		frappe.throw("Not allowed to create a Scan.", frappe.PermissionError)
+	company = _scan_company()
 	file_name = None
 	try:
 		from idp.core.security import assert_safe_file_url
@@ -132,7 +168,7 @@ def persist_scan(
 			"status": status,
 			"file_sha256": file_sha256_hex,
 			"pipeline_version": PIPELINE_VERSION,
-			"ocr_engine": ocr_engine or "paddle",
+			"ocr_engine": ocr_engine or "llm",
 			"ocr_text": (ocr_text or "")[:200000],
 			"path_taken": path_taken or ("hybrid" if extracted.get("used_llm") else "rule"),
 			"error_key": error_key,
@@ -147,7 +183,9 @@ def persist_scan(
 	# TaxMate owns the OCR worker until IDP run_read adopts the same pipeline.
 	doc.flags.skip_enqueue = True
 	doc.flags.skip_file_check = True
-	doc.insert(ignore_permissions=False)
+	# The caller was already checked. The DocType's own create perm must not
+	# block a clerk who is allowed to create the invoice.
+	doc.insert(ignore_permissions=True)
 	return doc.name
 
 

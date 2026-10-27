@@ -168,7 +168,12 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 
 	items = data.get("items") if isinstance(data.get("items"), list) else []
 	supplier_hint = str(header.get("supplier") or header.get("account_name") or "").strip().lower()
-	parsed_lines = _parse_tax_invoice_lines(body)
+	parsed_lines = (
+		_parse_tax_invoice_lines(body)
+		or _parse_coded_tax_lines(body)
+		or _parse_plain_tax_lines(body)
+		or _parse_code_amount_lines(body)
+	)
 	bad = not items
 	for row in items:
 		if not isinstance(row, dict):
@@ -189,7 +194,13 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 			bad = True
 			break
 	current_rows = [row for row in items if isinstance(row, dict)]
-	if parsed_lines and (bad or _rows_are_units(items) or len(parsed_lines) > len(current_rows)):
+	footer = _printed_footer(body)
+	if parsed_lines and (
+		_rows_match_footer(parsed_lines, footer)
+		or bad
+		or _rows_are_units(items)
+		or len(parsed_lines) > len(current_rows)
+	):
 		data["items"] = parsed_lines
 	elif bad:
 		desc = ""
@@ -241,6 +252,168 @@ def salvage_from_ocr_text(extracted: dict[str, Any], ocr_text: str | None) -> No
 					"uom": "Nos",
 				}
 			]
+	_apply_pos_receipt(data, header, body, parsed_lines)
+	if footer and not _retail_slip(body):
+		_stamp_printed_footer(header, footer)
+
+
+_POS_MONEY = r"\d{1,3}(?:,\d{3})*\.\d{2}"
+_POS_ITEM = re.compile(
+	rf"^\s*(?P<idx>\d{{1,3}})\s+(?P<body>.+?)\s+"
+	rf"(?P<price>{_POS_MONEY})\s+(?P<qty>{_POS_MONEY})\s+(?P<amt>{_POS_MONEY})\s*$"
+)
+_POS_STOP = re.compile(
+	r"net\s+amount|pay\s+by|item\s+count|sub\s*total|vat\s*%|\bvat\b",
+	re.IGNORECASE,
+)
+_POS_BARCODE = re.compile(r"^\d{8,14}$")
+
+
+def _apply_pos_receipt(
+	data: dict[str, Any],
+	header: dict[str, Any],
+	body: str,
+	tax_rows: list[dict[str, Any]],
+) -> None:
+	"""Retail slips print Price, Qty, Amt. A tax-invoice table already parsed wins."""
+	if tax_rows or not _retail_slip(body):
+		return
+	rows, vat = _parse_pos_receipt(body)
+	if not rows:
+		return
+	if not str(header.get("supplier") or "").strip():
+		for line in body.splitlines():
+			text = re.sub(r"\s+", " ", line).strip()
+			if len(text) < 4 or re.fullmatch(r"[\d\W]+", text):
+				continue
+			if re.search(r"^(tel|trn|shop|tax invoice)\b", text, re.IGNORECASE):
+				continue
+			header["supplier"] = text
+			break
+	current = [row for row in (data.get("items") or []) if isinstance(row, dict)]
+	if _prefer_pos_rows(current, rows):
+		data["items"] = rows
+		current = rows
+	if vat:
+		_apply_printed_vat(header, current, vat)
+
+
+def _prefer_pos_rows(current: list[dict[str, Any]], parsed: list[dict[str, Any]]) -> bool:
+	if not current or len(parsed) > len(current):
+		return True
+	return _price_stored_as_qty(current)
+
+
+def _price_stored_as_qty(items: list[dict[str, Any]]) -> bool:
+	"""Price landed in qty and the rate collapsed to 1."""
+	rows = [row for row in items if isinstance(row, dict)]
+	if not rows:
+		return False
+	hits = 0
+	for row in rows:
+		qty = float(row.get("qty") or 0)
+		rate = float(row.get("rate") or 0)
+		amount = float(row.get("amount") or 0)
+		if abs(rate - 1) < 0.02 and qty > 1 and abs(amount - qty) < 0.05:
+			hits += 1
+	return hits == len(rows)
+
+
+def _parse_pos_receipt(body: str) -> tuple[list[dict[str, Any]], dict[str, float] | None]:
+	rows: list[dict[str, Any]] = []
+	lines = body.splitlines()
+	index = 0
+	while index < len(lines):
+		match = _POS_ITEM.match(lines[index].strip())
+		if not match:
+			index += 1
+			continue
+		parts = [match.group("body").strip()]
+		price = _money(match.group("price"))
+		qty = _money(match.group("qty")) or 1
+		amount = _money(match.group("amt"))
+		index += 1
+		while index < len(lines):
+			nxt = lines[index].strip()
+			if not nxt or _POS_ITEM.match(nxt) or _POS_STOP.search(nxt) or _POS_BARCODE.match(nxt):
+				if _POS_BARCODE.match(nxt):
+					index += 1
+				break
+			parts.append(nxt)
+			index += 1
+		name = re.sub(r"\s+", " ", " ".join(parts)).strip(" -")
+		if not name or price < 0 or qty <= 0:
+			continue
+		rows.append(
+			{
+				"item_name": name,
+				"description": name,
+				"qty": qty,
+				"quantity": qty,
+				"rate": price,
+				"unit_price": price,
+				"amount": amount or round(price * qty, 2),
+				"uom": "Nos",
+			}
+		)
+	return rows, _pos_vat(body)
+
+
+def _retail_slip(body: str) -> bool:
+	"""A shop receipt names Price, Qty, and Amt. A tax invoice names Taxable Amt."""
+	if re.search(r"taxable\s+amt", body, re.IGNORECASE):
+		return False
+	return bool(re.search(r"\bprice\b.+\bqty\b.+\bamt\b", body, re.IGNORECASE | re.DOTALL))
+
+
+def _pos_vat(body: str) -> dict[str, float] | None:
+	lines = body.splitlines()
+	amount_only = re.compile(rf"^(?:{_POS_MONEY}\s+){{3}}{_POS_MONEY}$")
+	for index, line in enumerate(lines):
+		if not re.search(r"vat", line, re.IGNORECASE):
+			continue
+		nums = re.findall(_POS_MONEY, line)
+		if len(nums) < 4 and index + 1 < len(lines) and amount_only.match(lines[index + 1].strip()):
+			nums = re.findall(_POS_MONEY, lines[index + 1])
+		if len(nums) < 4:
+			continue
+		rate, net, vat, gross = (_money(token) for token in nums[:4])
+		if gross <= 0 or vat < 0 or net <= 0:
+			continue
+		if abs(round(net + vat, 2) - gross) > 0.05:
+			continue
+		return {"rate": rate, "net": net, "vat": vat, "gross": gross}
+	return None
+
+
+def _apply_printed_vat(
+	header: dict[str, Any],
+	items: list[dict[str, Any]],
+	vat: dict[str, float],
+) -> None:
+	"""Shelf prices on a tax invoice are VAT-inclusive. The draft stores the net."""
+	header["net_total"] = vat["net"]
+	header["grand_total"] = vat["gross"]
+	header["tax_total"] = vat["vat"]
+	header["total_taxes_and_charges"] = vat["vat"]
+	priced = [row for row in items if isinstance(row, dict)]
+	total = round(sum(float(row.get("amount") or 0) for row in priced), 2)
+	if not priced or abs(total - vat["gross"]) > 0.05 or abs(total - vat["net"]) <= 0.02:
+		return
+	running = 0.0
+	for row in priced[:-1]:
+		amount = round(float(row.get("amount") or 0) * vat["net"] / vat["gross"], 2)
+		qty = float(row.get("qty") or 1) or 1
+		row["amount"] = amount
+		row["rate"] = round(amount / qty, 2)
+		row["unit_price"] = row["rate"]
+		running += amount
+	last = priced[-1]
+	amount = round(vat["net"] - running, 2)
+	qty = float(last.get("qty") or 1) or 1
+	last["amount"] = amount
+	last["rate"] = round(amount / qty, 2)
+	last["unit_price"] = last["rate"]
 
 
 # Printed units that a column scan must not treat as the product.
@@ -379,15 +552,251 @@ def _parse_tax_invoice_lines(body: str) -> list[dict[str, Any]]:
 	return rows if len(rows) >= 2 else []
 
 
+_TABLE_MONEY = r"\d[\d,]*\.\d{2}"
+_CODED_TAX = re.compile(
+	rf"^\s*(?P<idx>\d{{1,3}})\s+"
+	rf"(?P<code>[A-Z][A-Z0-9-]{{2,}})\s+"
+	rf"(?P<body>.+?)\s+"
+	rf"(?P<qty>\d+(?:\.\d+)?)\s+"
+	rf"(?P<uom>[A-Za-z]{{2,12}})\s+"
+	rf"(?P<rate>{_TABLE_MONEY})\s+"
+	rf"(?P<taxable>{_TABLE_MONEY})\s+"
+	rf"(?P<vat>{_TABLE_MONEY})\s+"
+	rf"(?P<total>{_TABLE_MONEY})\s*$"
+)
+_PLAIN_TAX = re.compile(
+	rf"^\s*(?P<idx>\d{{1,3}})\s+"
+	rf"(?P<body>.+?)\s+"
+	rf"(?P<qty>\d+(?:\.\d+)?)\s+"
+	rf"(?P<uom>[A-Za-z]{{2,12}})\s+"
+	rf"(?P<rate>{_TABLE_MONEY})\s+"
+	rf"(?P<taxable>{_TABLE_MONEY})\s+"
+	rf"(?P<vat>{_TABLE_MONEY})\s+"
+	rf"(?P<total>{_TABLE_MONEY})\s*$"
+)
+_CODE_AMOUNT = re.compile(
+	rf"^\s*(?P<code>[A-Z][A-Z0-9-]{{2,}})\s+"
+	rf"(?P<body>.+?)\s+"
+	rf"(?P<qty>\d+(?:\.\d+)?)\s+"
+	rf"(?P<rate>{_TABLE_MONEY})\s+"
+	rf"(?P<amt>{_TABLE_MONEY})\s*$"
+)
+_TABLE_STOP = re.compile(
+	r"total\s+taxable|grand\s+total|vat\s*@|\bsubtotal\b|\btotal\s+aed\b|\bnotes\b|authorised",
+	re.IGNORECASE,
+)
+
+
+def _parse_coded_tax_lines(body: str) -> list[dict[str, Any]]:
+	"""# / code / description / qty / UOM / rate / taxable / VAT / total, with no discount column."""
+	return _walk_tax_table(body, _CODED_TAX, coded=True)
+
+
+def _parse_plain_tax_lines(body: str) -> list[dict[str, Any]]:
+	"""# / description / qty / UOM / rate / taxable / VAT / total. Descriptions may wrap."""
+	return _walk_tax_table(body, _PLAIN_TAX, coded=False)
+
+
+def _parse_code_amount_lines(body: str) -> list[dict[str, Any]]:
+	"""Item code, description, qty, rate, amount. VAT sits in the footer, not on the line."""
+	if not re.search(r"\bItem Code\b", body):
+		return []
+	rows: list[dict[str, Any]] = []
+	seen: set[str] = set()
+	lines = body.splitlines()
+	index = 0
+	while index < len(lines):
+		match = _CODE_AMOUNT.match(lines[index])
+		if not match:
+			index += 1
+			continue
+		code = match.group("code").strip()
+		parts = [match.group("body").strip()]
+		qty = _money(match.group("qty"))
+		rate = _money(match.group("rate"))
+		amount = _money(match.group("amt"))
+		index += 1
+		while index < len(lines):
+			nxt = lines[index]
+			if (
+				not nxt.strip()
+				or _CODE_AMOUNT.match(nxt)
+				or _TABLE_STOP.search(nxt)
+			):
+				break
+			parts.append(nxt.strip())
+			index += 1
+		if code in seen or qty <= 0 or abs(round(qty * rate, 2) - amount) > 0.05:
+			continue
+		seen.add(code)
+		name = re.sub(r"\s+", " ", " ".join(parts)).strip(" -")
+		rows.append(_exclusive_row(code=code, name=name, qty=qty, uom="Nos", rate=rate, amount=amount))
+	return rows if len(rows) >= 2 else []
+
+
+def _walk_tax_table(body: str, pattern: re.Pattern[str], *, coded: bool) -> list[dict[str, Any]]:
+	rows: list[dict[str, Any]] = []
+	seen: set[str] = set()
+	lines = body.splitlines()
+	index = 0
+	while index < len(lines):
+		match = pattern.match(lines[index])
+		if not match:
+			index += 1
+			continue
+		parts = [match.group("body").strip()]
+		code = match.group("code").strip() if coded else ""
+		qty = _money(match.group("qty"))
+		uom = match.group("uom").strip()
+		rate = _money(match.group("rate"))
+		taxable = _money(match.group("taxable"))
+		vat = _money(match.group("vat"))
+		total = _money(match.group("total"))
+		index += 1
+		while index < len(lines):
+			nxt = lines[index]
+			if not nxt.strip() or pattern.match(nxt) or _TABLE_STOP.search(nxt) or _CODE_AMOUNT.match(nxt):
+				break
+			parts.append(nxt.strip())
+			index += 1
+		if qty <= 0 or not _line_agrees(qty, rate, taxable, vat, total):
+			continue
+		if coded and (not code or code in seen or _unit_token(code)):
+			continue
+		name = re.sub(r"\s+", " ", " ".join(parts)).strip(" -")
+		if coded:
+			seen.add(code)
+		rows.append(_exclusive_row(code=code, name=name, qty=qty, uom=uom, rate=rate, amount=taxable))
+	return rows if len(rows) >= 2 else []
+
+
+def _line_agrees(qty: float, rate: float, taxable: float, vat: float, total: float) -> bool:
+	if abs(round(qty * rate, 2) - taxable) <= 0.05:
+		return True
+	return abs(round(taxable + vat, 2) - total) <= 0.05
+
+
+def _exclusive_row(
+	*,
+	code: str,
+	name: str,
+	qty: float,
+	uom: str,
+	rate: float,
+	amount: float,
+) -> dict[str, Any]:
+	label = name or code
+	row: dict[str, Any] = {
+		"item_name": label,
+		"description": label,
+		"qty": qty,
+		"quantity": qty,
+		"uom": uom or "Nos",
+		"stock_uom": uom or "Nos",
+		"rate": rate,
+		"unit_price": rate,
+		"amount": amount,
+		"conversion_factor": 1,
+		"stock_qty": qty,
+		"base_rate": rate,
+		"base_amount": amount,
+	}
+	if code:
+		row["item_code"] = code
+	return row
+
+
+def _printed_footer(body: str) -> dict[str, float] | None:
+	"""Printed taxable, VAT, and grand total. Each label is read from its own line."""
+	layouts = (
+		(
+			r"Total\s+Taxable\s+Amount\s*:?\s*([\d,]+\.\d{2})",
+			r"VAT\s*@\s*5%\s*:?\s*([\d,]+\.\d{2})",
+			r"Grand\s+Total\s*\(AED\)\s*:?\s*([\d,]+\.\d{2})",
+		),
+		(
+			r"\bSubtotal\s+([\d,]+\.\d{2})",
+			r"\bVAT\s+5%\s+([\d,]+\.\d{2})",
+			r"\bTOTAL\s+AED\s+([\d,]+\.\d{2})",
+		),
+	)
+	for net_re, vat_re, grand_re in layouts:
+		net = _line_money(body, net_re)
+		vat = _line_money(body, vat_re)
+		grand = _line_money(body, grand_re)
+		if net is None or vat is None or grand is None:
+			continue
+		if grand <= 0 or abs(round(net + vat, 2) - grand) > 0.05:
+			continue
+		return {"net": net, "vat": vat, "grand": grand}
+	return None
+
+
+def _line_money(body: str, pattern: str) -> float | None:
+	for line in body.splitlines():
+		match = re.search(pattern, line, re.IGNORECASE)
+		if match:
+			return _money(match.group(1))
+	return None
+
+
+def _rows_match_footer(rows: list[dict[str, Any]], footer: dict[str, float] | None) -> bool:
+	if not footer:
+		return False
+	total = round(sum(float(row.get("amount") or 0) for row in rows), 2)
+	return abs(total - footer["net"]) <= 0.05
+
+
+def _stamp_printed_footer(header: dict[str, Any], footer: dict[str, float]) -> None:
+	header["net_total"] = footer["net"]
+	header["grand_total"] = footer["grand"]
+	header["tax_total"] = footer["vat"]
+	header["total_taxes_and_charges"] = footer["vat"]
+
+
 def _letterhead_name(body: str) -> str:
 	match = re.search(
 		r"(?m)^([A-Z][A-Za-z0-9&.,'()-]{2,}(?:\s+[A-Za-z0-9&.,'()-]+){0,8})\s{2,}TAX\s+INVOICE",
 		body,
 	)
 	if match:
-		return re.sub(r"\s+", " ", match.group(1)).strip(" -")
+		return _with_trailing_llc(match.group(1), body[match.end() :])
 	match = re.search(r"(?m)^([^\n]{4,80})\n[ \t]*TAX\s+INVOICE", body, re.IGNORECASE)
-	return match.group(1).strip() if match else ""
+	if match and not re.search(r"\bTRN\b|\bTel\b", match.group(1), re.IGNORECASE):
+		return _with_trailing_llc(match.group(1), body[match.end() :])
+	banner = re.search(r"(?m)^\s*([A-Z][^|\n]{3,80}?)\s+LLC\s*\|", body)
+	if banner:
+		return re.sub(r"\s+", " ", banner.group(1)).strip() + " LLC"
+	# The seller is the first company line above the tax-invoice title.
+	lines = [line.strip() for line in body.splitlines() if line.strip()]
+	for index, line in enumerate(lines[:8]):
+		if "|" in line or not re.search(r"\bLLC\b|\bL\.L\.C\b", line, re.IGNORECASE):
+			continue
+		window = " ".join(lines[index : index + 6])
+		if re.search(r"TAX\s+INVOICE", window, re.IGNORECASE):
+			return re.sub(r"\s+", " ", line).strip()
+	return ""
+
+
+def _with_trailing_llc(name: str, rest: str) -> str:
+	"""A wrapped letterhead prints LLC on the next line. Keep it on the supplier name."""
+	clean = re.sub(r"\s+", " ", name).strip(" -")
+	if re.search(r"\bLLC\b", clean, re.IGNORECASE):
+		return clean
+	for line in rest.splitlines():
+		if not line.strip():
+			continue
+		if re.fullmatch(r"L\.?L\.?C\.?", line.strip(), re.IGNORECASE):
+			return f"{clean} LLC"
+		break
+	return clean
+
+
+def _letterhead_completes(current: str, letter: str) -> bool:
+	"""The printed letterhead is the same party with the legal suffix the mapper dropped."""
+	cur = re.sub(r"\s+", " ", current).strip().lower()
+	full = re.sub(r"\s+", " ", letter).strip().lower()
+	return bool(cur) and full.startswith(cur) and len(full) > len(cur)
 
 
 def _bill_to_name(body: str) -> str:
@@ -401,12 +810,12 @@ def _split_trns(body: str) -> tuple[str, str]:
 	parts = re.split(r"Bill\s*To", body, maxsplit=1, flags=re.IGNORECASE)
 
 	def first(chunk: str) -> str:
-		found = re.search(r"TRN\s*:?\s*(1\d{14})", chunk)
+		found = re.search(r"(?:TRN|Tax\s*Registration\s*Number)\s*:?\s*(1\d{14})", chunk)
 		return found.group(1) if found else ""
 
 	if len(parts) == 2:
 		return first(parts[0]), first(parts[1])
-	found = re.findall(r"TRN\s*:?\s*(1\d{14})", body)
+	found = re.findall(r"(?:TRN|Tax\s*Registration\s*Number)\s*:?\s*(1\d{14})", body)
 	seller = found[0] if found else ""
 	buyer = found[1] if len(found) > 1 else ""
 	return seller, buyer
@@ -425,7 +834,10 @@ def _fill_printed_header(header: dict[str, Any], body: str, doctype: str) -> Non
 		letter = _letterhead_name(body)
 		bill_to = _bill_to_name(body)
 		if letter and (
-			not current or _unit_token(current) or (bill_to and current.lower() == bill_to.lower())
+			not current
+			or _unit_token(current)
+			or (bill_to and current.lower() == bill_to.lower())
+			or _letterhead_completes(current, letter)
 		):
 			header["supplier"] = letter
 		tax = re.sub(r"\s+", "", str(header.get("tax_id") or ""))
@@ -434,17 +846,29 @@ def _fill_printed_header(header: dict[str, Any], body: str, doctype: str) -> Non
 	if not str(header.get("currency") or "").strip() and re.search(r"\bAED\b|\(AED\)", body):
 		header["currency"] = "AED"
 	if not str(header.get("bill_no") or "").strip():
-		match = re.search(r"Invoice\s*No\.?\s*:?\s*([A-Z0-9][A-Z0-9-]*)", body, re.IGNORECASE)
+		match = re.search(r"Invoice\s*No\.?\s*:?\s*([A-Z0-9][A-Z0-9/-]*)", body, re.IGNORECASE)
+		if not match:
+			match = re.search(r"Invoice\s*#\D{0,40}(\d{3,})", body, re.IGNORECASE)
 		if match:
 			header["bill_no"] = match.group(1)
 	if not str(header.get("posting_date") or "").strip():
-		match = re.search(r"Invoice\s*Date\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", body, re.IGNORECASE)
+		match = re.search(
+			r"Invoice\s*Date\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}[/-][A-Za-z]{3,9}[/-]\d{4})",
+			body,
+			re.IGNORECASE,
+		)
+		if not match:
+			match = re.search(r"Date\s*Time\D{0,40}(\d{1,2}[/-]\d{1,2}[/-]\d{4})", body, re.IGNORECASE)
 		if match:
 			parsed = _parse_ocr_date(match.group(1))
 			if parsed:
 				header["posting_date"] = parsed
 	if not str(header.get("due_date") or "").strip():
-		match = re.search(r"Due\s*Date\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", body, re.IGNORECASE)
+		match = re.search(
+			r"Due\s*Date\s*:?\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}[/-][A-Za-z]{3,9}[/-]\d{4})",
+			body,
+			re.IGNORECASE,
+		)
 		if match:
 			parsed = _parse_ocr_date(match.group(1))
 			if parsed:
@@ -801,6 +1225,12 @@ def scope_extract_to_company(extracted: dict[str, Any]) -> None:
 				continue
 			code = str(row.get("item_code") or "").strip()
 			if code and not link_readable("Item", code):
+				import frappe
+
+				# A printed SKU that does not exist yet is created later.
+				# A code that exists for another company must not be reused.
+				if not frappe.db.exists("Item", code):
+					row["_printed_item_code"] = code
 				row.pop("item_code", None)
 				changed = True
 	if changed:
@@ -839,10 +1269,10 @@ def build_proposals(extracted: dict[str, Any]) -> list[dict[str, Any]]:
 	validation = extracted.get("validation") or {}
 	creatable, _blocked = split_missing(validation.get("missing_masters"))
 	data = extracted.get("extracted_data") or {}
+	items = [row for row in (data.get("items") or []) if isinstance(row, dict)]
 	if not creatable and not (extracted.get("_printed_parties") or {}):
 		return []
 	header = dict(data.get("header") or {})
-	items = [row for row in (data.get("items") or []) if isinstance(row, dict)]
 	proposals: list[dict[str, Any]] = []
 	seen: set[str] = set()
 	for row in creatable:
@@ -1320,6 +1750,10 @@ def _parse_ocr_date(value: str) -> str:
 		if 1 <= day <= 31 and 1 <= month <= 12:
 			return f"{year:04d}-{month:02d}-{day:02d}"
 		return ""
+	# 29-Sep-2026
+	named_slash = re.fullmatch(r"(\d{1,2})[/-]([A-Za-z]{3,9})[/-](\d{2,4})", text)
+	if named_slash:
+		text = f"{named_slash.group(1)} {named_slash.group(2)} {named_slash.group(3)}"
 	# 18th August,2026 / 18 August 2026 / 18th Aug'26
 	m = re.search(
 		r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})'?[,\s]+(\d{2,4})",
@@ -1410,8 +1844,9 @@ def _clean_item_label(label: str) -> str:
 		if len(head) >= 8:
 			text = head
 	words = text.split()
-	if len(words) > 8:
-		text = " ".join(words[:8])
+	# A wrapped service line is still one item. Only cut a long OCR paragraph.
+	if len(words) > 16:
+		text = " ".join(words[:16])
 	return text.strip(" -,") or label.strip()
 
 
@@ -1732,6 +2167,84 @@ def _create_supplier(values: dict[str, str]) -> str:
 	if _has_address(values):
 		_attach_address_contact("Supplier", doc.name, name, values)
 	return doc.name
+
+
+def ensure_named_items(items: list[Any]) -> None:
+	"""Give a printed line an item code. Match by name, otherwise create it."""
+	for row in items:
+		if not isinstance(row, dict) or str(row.get("item_code") or "").strip():
+			continue
+		name = str(row.get("item_name") or row.get("description") or "").strip()
+		if not name:
+			continue
+		group = item_group_for_label(name) or _generic_item_group()
+		printed = str(row.pop("_printed_item_code", "") or "").strip()
+		row["item_code"] = _create_item(
+			{
+				"item_name": name,
+				"item_code": printed or _slug_code(name),
+				"item_group": group,
+				"stock_uom": str(row.get("uom") or row.get("stock_uom") or "Nos"),
+			}
+		)
+
+
+def keep_supplier_invoice_date(header: dict[str, Any], doctype: str) -> None:
+	"""ERPNext replaces the posting date unless Edit Posting Date is set.
+
+	The printed invoice date is both the posting date and the supplier invoice date.
+	The due date is checked against that date, so a scan today must not move it to today.
+	"""
+	if doctype != "Purchase Invoice":
+		return
+	printed = str(header.get("posting_date") or "").strip()
+	if not printed:
+		return
+	header["set_posting_time"] = 1
+	if not str(header.get("bill_date") or "").strip():
+		header["bill_date"] = printed
+
+
+def fold_printed_discounts(header: dict[str, Any], items: list[Any]) -> None:
+	"""A tax invoice prints a line discount. ERPNext's row discount is per unit and rounds the net off.
+
+	The line rates stay as printed. The discount total is applied once on the net total.
+	"""
+	total = 0.0
+	for row in items:
+		if not isinstance(row, dict):
+			continue
+		disc = float(row.get("discount_amount") or 0)
+		rate = float(row.get("rate") or 0)
+		qty = float(row.get("qty") or 0)
+		if disc <= 0 or qty <= 0:
+			continue
+		total += disc if disc > rate else disc * qty
+		row.pop("discount_amount", None)
+	if total <= 0:
+		return
+	if not str(header.get("apply_discount_on") or "").strip():
+		header["apply_discount_on"] = "Net Total"
+	header["discount_amount"] = round(float(header.get("discount_amount") or 0) + total, 2)
+
+
+def bind_typed_customer(header: dict[str, Any], doctype: str) -> None:
+	"""Resolve a customer the clerk typed on a sale. Create one when it is new."""
+	if doctype not in ("Sales Invoice", "Sales Order", "Quotation", "Delivery Note"):
+		return
+	typed = str(header.get("customer") or "").strip()
+	if not typed:
+		return
+	import frappe
+
+	if frappe.db.exists("Customer", typed):
+		header["customer"] = typed
+		return
+	found = frappe.db.get_value("Customer", {"customer_name": typed}, "name")
+	if found:
+		header["customer"] = found
+		return
+	header["customer"] = _create_customer({"customer_name": typed, "customer_type": "Individual"})
 
 
 def _create_customer(values: dict[str, str]) -> str:

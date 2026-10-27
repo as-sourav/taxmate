@@ -5,9 +5,17 @@
 const LONG_EDGE = 2400;
 const JPEG_QUALITY = 0.85;
 const MIN_EDGE = 480;
+const MIN_SOURCE = 160;
 const MAX_BYTES = 25 * 1024 * 1024;
-/** Conservative blur gate; server still re-checks. */
+/** Used only when the clerk did not frame the photo. */
 const MIN_SHARPNESS = 2.5;
+
+/** A framed photo is rejected only when the crop itself is tiny. */
+export function scanImageDecision(shortEdge: number, sharpness: number, framed: boolean): "ok" | "retake" {
+  if (shortEdge < MIN_SOURCE) return "retake";
+  if (!framed && sharpness < MIN_SHARPNESS) return "retake";
+  return "ok";
+}
 
 /** Normalized crop in image space (0–1). */
 export type CropRect = { x: number; y: number; w: number; h: number };
@@ -31,6 +39,25 @@ export function isImageFile(file: File): boolean {
   const name = (file.name || "").toLowerCase();
   if (type.startsWith("image/")) return true;
   return /\.(jpe?g|png|webp|gif|bmp)$/i.test(name);
+}
+
+function peakSharpness(ctx: CanvasRenderingContext2D, width: number, height: number): number {
+  const size = 160;
+  const spots: Array<[number, number]> = [
+    [0, 0],
+    [Math.max(0, width - size), 0],
+    [0, Math.max(0, height - size)],
+    [Math.max(0, width - size), Math.max(0, height - size)],
+    [Math.max(0, Math.floor((width - size) / 2)), Math.max(0, Math.floor((height - size) / 2))],
+  ];
+  let best = 0;
+  for (const [x, y] of spots) {
+    const sw = Math.min(size, width - x);
+    const sh = Math.min(size, height - y);
+    if (sw < 8 || sh < 8) continue;
+    best = Math.max(best, varianceOfLaplacianApprox(ctx.getImageData(x, y, sw, sh)));
+  }
+  return best;
 }
 
 function varianceOfLaplacianApprox(data: ImageData): number {
@@ -147,12 +174,17 @@ export async function prepareScanImage(
     const srcW = crop ? Math.max(1, Math.round(crop.w * bitmap.width)) : bitmap.width;
     const srcH = crop ? Math.max(1, Math.round(crop.h * bitmap.height)) : bitmap.height;
 
-    const scale = Math.min(1, LONG_EDGE / Math.max(srcW, srcH));
-    const w = Math.max(1, Math.round(srcW * scale));
-    const h = Math.max(1, Math.round(srcH * scale));
-    if (Math.min(w, h) < MIN_EDGE) {
+    const framed = Boolean(crop);
+    const sourceShort = Math.min(srcW, srcH);
+    if (scanImageDecision(sourceShort, Number.POSITIVE_INFINITY, framed) === "retake") {
       return { error_key: "idp.retake" };
     }
+    let scale = Math.min(1, LONG_EDGE / Math.max(srcW, srcH));
+    if (sourceShort * scale < MIN_EDGE) {
+      scale = Math.min(MIN_EDGE / sourceShort, LONG_EDGE / Math.max(srcW, srcH));
+    }
+    const w = Math.max(1, Math.round(srcW * scale));
+    const h = Math.max(1, Math.round(srcH * scale));
 
     const canvas = document.createElement("canvas");
     canvas.width = w;
@@ -164,8 +196,7 @@ export async function prepareScanImage(
     ctx.drawImage(bitmap, srcX, srcY, srcW, srcH, 0, 0, w, h);
     applyMildContrast(ctx, w, h);
 
-    const sample = ctx.getImageData(0, 0, Math.min(w, 320), Math.min(h, 320));
-    if (varianceOfLaplacianApprox(sample) < MIN_SHARPNESS) {
+    if (!framed && scanImageDecision(sourceShort, peakSharpness(ctx, w, h), framed) === "retake") {
       return { error_key: "idp.retake" };
     }
 

@@ -22,7 +22,7 @@ def detect_language_from_text(text: str | None) -> str:
 
 
 def extract_once(file_url: str, language: str | None = None) -> tuple[Any, str]:
-	"""One extract_content call. Language for mapping is derived from OCR text."""
+	"""One extract_content call. A scanned page is read inside IDP."""
 	from idp.extractors import extract_content
 
 	lang = language or "en"

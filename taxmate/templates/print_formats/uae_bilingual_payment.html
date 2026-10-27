@@ -1,0 +1,254 @@
+{# UAE bilingual payment voucher / سند صرف — Payment Entry.
+   English and Arabic labels are both written out. Stored party names,
+   account names, and narration stay as entered on the document. #}
+{% from "templates/print_formats/uae_money.html" import uae_money %}
+{% include "templates/print_formats/uae_print_head.html" %}
+{% set is_receive = doc.payment_type == "Receive" %}
+{% set is_transfer = doc.payment_type == "Internal Transfer" %}
+{% set title_en = "Payment Receipt" if is_receive else ("Internal Transfer" if is_transfer else "Payment Voucher") %}
+{% set title_ar = "سند قبض" if is_receive else ("تحويل داخلي" if is_transfer else "سند صرف") %}
+{% set party_en = "Received From" if is_receive else ("Party" if is_transfer else "Paid To") %}
+{% set party_ar = "استلم من" if is_receive else ("الطرف" if is_transfer else "دفع إلى") %}
+{% set cur = doc.paid_from_account_currency or doc.paid_to_account_currency or "AED" %}
+{% set recv_cur = doc.paid_to_account_currency or cur %}
+{% set kind_ar = {"Supplier": "مورد", "Customer": "عميل", "Employee": "موظف", "Shareholder": "مساهم"} %}
+{% set ref_ar = {
+  "Sales Invoice": "فاتورة مبيعات",
+  "Purchase Invoice": "فاتورة مشتريات",
+  "Sales Order": "أمر بيع",
+  "Purchase Order": "أمر شراء",
+  "Journal Entry": "قيد يومية"
+} %}
+<style>
+.tm-pay { font-family: "Noto Naskh Arabic", "Noto Sans", "DejaVu Sans", sans-serif; color: #111; font-size: 11pt; }
+.tm-pay table { border-collapse: collapse; }
+.tm-pay .hdr { width: 100%; margin-bottom: 12px; border-bottom: 2px solid #0b3d2e; }
+.tm-pay .hdr td { vertical-align: top; padding-bottom: 10px; }
+.tm-pay .titles h1 { margin: 0; font-size: 18pt; color: #0b3d2e; }
+.tm-pay .titles .ar { direction: rtl; font-size: 16pt; margin-top: 2px; }
+.tm-pay .meta { text-align: right; font-size: 10pt; }
+.tm-pay table.lines { width: 100%; margin-top: 8px; }
+.tm-pay table.lines th, .tm-pay table.lines td { border: 1px solid #ccc; padding: 5px 6px; vertical-align: top; }
+.tm-pay table.lines th { background: #0b3d2e; color: #fff; font-size: 9pt; text-align: left; }
+.tm-pay .num { text-align: right; white-space: nowrap; }
+.tm-pay .tm-amt { direction: ltr; unicode-bidi: isolate; }
+.tm-pay .remarks { margin-top: 12px; white-space: pre-wrap; }
+.tm-pay .sign { margin-top: 28px; font-size: 10pt; }
+.tm-pay .sign .ar { direction: rtl; text-align: right; }
+</style>
+<div class="tm-pay">
+  <table class="hdr">
+    <tr>
+      <td class="titles">
+        <h1>{{ title_en }}</h1>
+        <div class="ar">{{ title_ar }}</div>
+      </td>
+      <td class="meta">
+        <div><strong>Voucher No. / رقم السند:</strong> {{ doc.name }}</div>
+        <div><strong>Date / التاريخ:</strong> {{ doc.get_formatted("posting_date") }}</div>
+        {% if doc.company %}<div><strong>Company / الشركة:</strong> {{ doc.company }}</div>{% endif %}
+      </td>
+    </tr>
+  </table>
+
+  <table class="lines">
+    {% if doc.party_name or doc.party %}
+    <tr>
+      <th>{{ party_en }} / {{ party_ar }}</th>
+      <td>{{ doc.party_name or doc.party }}</td>
+    </tr>
+    {% endif %}
+    {% if doc.party_type %}
+    <tr>
+      <th>Party Type / نوع الطرف</th>
+      <td>{{ doc.party_type }}{% if kind_ar.get(doc.party_type) %} / {{ kind_ar.get(doc.party_type) }}{% endif %}</td>
+    </tr>
+    {% endif %}
+    {% if doc.mode_of_payment %}
+    <tr>
+      <th>Mode of Payment / طريقة الدفع</th>
+      <td>{{ doc.mode_of_payment }}</td>
+    </tr>
+    {% endif %}
+    {% if doc.reference_no %}
+    <tr>
+      <th>Reference No. / رقم المرجع</th>
+      <td>{{ doc.reference_no }}{% if doc.reference_date %} · {{ doc.get_formatted("reference_date") }}{% endif %}</td>
+    </tr>
+    {% endif %}
+    {% if doc.paid_from %}
+    <tr>
+      <th>From Account / من حساب</th>
+      <td>{{ doc.paid_from }}</td>
+    </tr>
+    {% endif %}
+    {% if doc.paid_to %}
+    <tr>
+      <th>To Account / إلى حساب</th>
+      <td>{{ doc.paid_to }}</td>
+    </tr>
+    {% endif %}
+    <tr>
+      <th>Amount / المبلغ</th>
+      <td class="num">{{ uae_money(doc.paid_amount, cur) }}</td>
+    </tr>
+    {% if recv_cur != cur %}
+    <tr>
+      <th>Received / المبلغ المستلم</th>
+      <td class="num">{{ uae_money(doc.received_amount, recv_cur) }}</td>
+    </tr>
+    {% endif %}
+    {% if doc.in_words %}
+    <tr>
+      <th>In Words / كتابة</th>
+      <td>{{ doc.in_words }}</td>
+    </tr>
+    {% endif %}
+    {% if doc.total_allocated_amount %}
+    <tr>
+      <th>Allocated / المبلغ المخصص</th>
+      <td class="num">{{ uae_money(doc.total_allocated_amount, cur) }}</td>
+    </tr>
+    {% endif %}
+    {% if doc.unallocated_amount and (doc.unallocated_amount | abs) > 0.004 %}
+    <tr>
+      <th>Unallocated / غير مخصص</th>
+      <td class="num">{{ uae_money(doc.unallocated_amount, cur) }}</td>
+    </tr>
+    {% endif %}
+    {% if doc.difference_amount and (doc.difference_amount | abs) > 0.004 %}
+    <tr>
+      <th>Difference / الفرق</th>
+      <td class="num">{{ uae_money(doc.difference_amount, cur) }}</td>
+    </tr>
+    {% endif %}
+  </table>
+
+  {% if doc.deductions %}
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>Deduction / الخصم</th>
+        <th class="num">Amount / المبلغ</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in doc.deductions %}
+      <tr>
+        <td>{{ row.account }}{% if row.description %}<div>{{ row.description }}</div>{% endif %}</td>
+        <td class="num">{{ uae_money(row.amount, cur) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if doc.taxes %}
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>Tax / الضريبة</th>
+        <th class="num">Amount / المبلغ</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in doc.taxes %}
+      <tr>
+        <td>{{ row.description or row.account_head }}</td>
+        <td class="num">{{ uae_money(row.tax_amount, cur) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if doc.references %}
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Against / مقابل</th>
+        <th class="num">Allocated / المبلغ المخصص</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in doc.references %}
+      <tr>
+        <td>{{ row.idx or loop.index }}</td>
+        <td>
+          {{ row.reference_doctype }}{% if ref_ar.get(row.reference_doctype) %} / {{ ref_ar.get(row.reference_doctype) }}{% endif %}
+          <div>{{ row.reference_name }}</div>
+        </td>
+        <td class="num">{{ uae_money(row.allocated_amount, cur) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if doc.remarks %}
+  <div class="remarks">
+    <strong>Narration / البيان</strong><br>{{ doc.remarks }}
+  </div>
+  {% endif %}
+
+  {% set gl = frappe.get_list(
+    doctype="GL Entry",
+    fields=["account", "party_type", "party", "debit", "credit"],
+    filters={"voucher_type": doc.doctype, "voucher_no": doc.name},
+    limit=200
+  ) %}
+  {% if gl %}
+  {% set company_cur = frappe.db.get_value("Company", doc.company, "default_currency") or cur %}
+  {% set debit_total = gl | sum(attribute="debit") %}
+  {% set credit_total = gl | sum(attribute="credit") %}
+  <table class="lines">
+    <thead>
+      <tr>
+        <th>Account / الحساب</th>
+        <th>Party Type / نوع الطرف</th>
+        <th>Party / الطرف</th>
+        <th class="num">Amount / المبلغ</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="4"><strong>Debit / مدين</strong></td></tr>
+      {% for entries in gl %}
+      {% if entries.debit and not entries.credit %}
+      <tr>
+        <td>{{ entries.account }}</td>
+        <td>{% if entries.party_type %}{{ entries.party_type }}{% if kind_ar.get(entries.party_type) %} / {{ kind_ar.get(entries.party_type) }}{% endif %}{% endif %}</td>
+        <td>{% if entries.party %}{{ entries.party }}{% endif %}</td>
+        <td class="num">{{ uae_money(entries.debit, company_cur) }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+      <tr>
+        <td colspan="3"><strong>Total (debit) / إجمالي المدين</strong></td>
+        <td class="num">{{ uae_money(debit_total, company_cur) }}</td>
+      </tr>
+      <tr><td colspan="4"><strong>Credit / دائن</strong></td></tr>
+      {% for entries in gl %}
+      {% if entries.credit and not entries.debit %}
+      <tr>
+        <td>{{ entries.account }}</td>
+        <td>{% if entries.party_type %}{{ entries.party_type }}{% if kind_ar.get(entries.party_type) %} / {{ kind_ar.get(entries.party_type) }}{% endif %}{% endif %}</td>
+        <td>{% if entries.party %}{{ entries.party }}{% endif %}</td>
+        <td class="num">{{ uae_money(entries.credit, company_cur) }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+      <tr>
+        <td colspan="3"><strong>Total (credit) / إجمالي الدائن</strong></td>
+        <td class="num">{{ uae_money(credit_total, company_cur) }}</td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="sign">
+    <div>For / عن {{ doc.company }}</div>
+    <div class="ar">Authorized Signatory / المفوض بالتوقيع</div>
+  </div>
+</div>
+{% include "templates/print_formats/uae_print_foot.html" %}

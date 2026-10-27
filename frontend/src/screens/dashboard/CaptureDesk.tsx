@@ -527,8 +527,11 @@ async function onTakePhoto() {
       : review?.stage_log ?? [];
 
   const reviewReady = proposalsReady(proposals);
+  const customerPending = writes.some(
+    (row) => row.field === "customer" && !String(row.value || "").trim(),
+  );
   const canSave = Boolean(
-    review && reviewReady && (review.can_delete || review.can_save || proposals.length > 0),
+    review && reviewReady && !customerPending && (review.can_delete || review.can_save || proposals.length > 0),
   );
   const canSubmit = Boolean(
     review && reviewReady && (review.can_submit || (canSave && proposals.length > 0 && !review.can_delete)),
@@ -545,11 +548,13 @@ async function onTakePhoto() {
         : fieldsPending
           ? "idp.propose.needFields"
           : "idp.propose.needConsent"
-      : review.gaps && review.gaps.length > 0
-        ? "idp.blocked.gaps"
-        : !canSave
-          ? "idp.blocked.save"
-          : null;
+      : customerPending
+        ? "idp.propose.needFields"
+        : review.gaps && review.gaps.length > 0
+          ? "idp.blocked.gaps"
+          : !canSave
+            ? "idp.blocked.save"
+            : null;
 
   const statusKey =
     phase === "uploading"
@@ -972,7 +977,24 @@ function ReviewBlock({
               return (
                 <label className="idp-field" key={row.field} htmlFor={fieldId}>
                   <span className="idp-field-label">{fieldLabel(row.label_key)}</span>
-                  {row.options && row.options.length > 0 ? (
+                  {row.field === "customer" ? (
+                    <>
+                      <input
+                        id={fieldId}
+                        list={row.options && row.options.length > 0 ? `${fieldId}-list` : undefined}
+                        type="text"
+                        value={row.value}
+                        onChange={(event) => onWrite(row.field, event.target.value)}
+                      />
+                      {row.options && row.options.length > 0 ? (
+                        <datalist id={`${fieldId}-list`}>
+                          {row.options.map((option) => (
+                            <option key={option} value={option} />
+                          ))}
+                        </datalist>
+                      ) : null}
+                    </>
+                  ) : row.options && row.options.length > 0 ? (
                     <select
                       id={fieldId}
                       value={row.value}

@@ -87,11 +87,12 @@ website_route_rules = [
 # Jinja
 # ----------
 
-# add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "taxmate.utils.jinja_methods",
-# 	"filters": "taxmate.utils.jinja_filters"
-# }
+# Print templates call tm_is_arabic() so Arabic headings follow the request language.
+jinja = {
+	"methods": [
+		"taxmate.utils.jinja_methods",
+	],
+}
 
 # Installation
 # ------------

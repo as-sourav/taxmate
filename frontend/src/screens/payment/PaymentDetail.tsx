@@ -2,6 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { printDocUrl } from "../../lib/printDoc";
 import { confirmCancel } from "../../lib/workflow";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
@@ -235,16 +236,8 @@ export default function PaymentDetail() {
   );
 }
 
-/** Frappe's own print view. "Bank and Cash Payment Voucher" is the only
-    Payment Entry format ERPNext ships; a missing format falls back to
-    Standard rather than erroring (printview.py:133). */
+/** Desk's Bank and Cash voucher hardcodes English and prints raw numbers.
+    This format is the same voucher, bilingual, with the currency on every amount. */
 function printUrl(name: string): string {
-  const p = new URLSearchParams({
-    doctype: DT.paymentEntry,
-    name,
-    trigger_print: "1",
-    format: "Bank and Cash Payment Voucher",
-    no_letterhead: "0",
-  });
-  return `/printview?${p.toString()}`;
+  return printDocUrl(DT.paymentEntry, name, "UAE Bilingual Payment");
 }

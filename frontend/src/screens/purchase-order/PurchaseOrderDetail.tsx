@@ -10,7 +10,7 @@ import { date, money, qty } from "../../lib/format";
 import { t } from "../../i18n/strings";
 import { formatLineDiscount, TxnTotals } from "../../components/txnFields";
 import { lineHasProductDiscount, productDiscountTotal, readDiscountBasis } from "../../lib/txn";
-import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow, SumRow } from "../../components/ui";
+import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow } from "../../components/ui";
 import { FormLayout } from "../../components/form";
 import DetailActions from "../../components/DetailActions";
 import LineItems, { type LineField } from "../../components/LineItems";
@@ -90,14 +90,7 @@ export default function PurchaseOrderDetail() {
   const cur = data.currency || "";
   const lines = data.items ?? [];
   const showLineDiscount = lines.some(lineHasProductDiscount);
-  const returnedValue = lines.reduce(
-    (sum, row) => sum + (Number(row.returned_qty) || 0) * (Number(row.rate) || 0),
-    0,
-  );
-  const receivedValue = lines.reduce(
-    (sum, row) => sum + (Number(row.received_qty) || 0) * (Number(row.rate) || 0),
-    0,
-  );
+  const returnedQty = lines.reduce((sum, row) => sum + (Number(row.returned_qty) || 0), 0);
 
   return (
     <>
@@ -170,10 +163,12 @@ export default function PurchaseOrderDetail() {
             <h2 style={{ margin: "0 0 13px", fontSize: 13.5, fontWeight: 600 }}>{t("dn.summary")}</h2>
             <ReadRow k={t("so.col.orderDate")} v={date(data.transaction_date)} />
             <ReadRow k={t("po.required")} v={date(data.schedule_date)} />
+            <ReadRow k={t("mr.received")} v={`${Number(data.per_received || 0)}%`} />
+            <ReadRow k={t("stage.billed")} v={`${Number(data.per_billed || 0)}%`} />
             <TxnTotals
               currency={cur}
               itemsTotal={data.total}
-              productDiscount={productDiscountTotal(data.items ?? [])}
+              productDiscount={productDiscountTotal(lines)}
               orderDiscount={data.discount_amount}
               orderDiscountPercent={data.additional_discount_percentage}
               discountOn={readDiscountBasis(data.apply_discount_on, Number(data.discount_amount) > 0)}
@@ -183,15 +178,8 @@ export default function PurchaseOrderDetail() {
               netLabel={t("sod.net")}
               vatLabel={t("sod.vat")}
               grandLabel={t("sod.grand")}
-            >
-              {returnedValue > 0.004 && (
-                <>
-                  <SumRow k={t("po.returnedValue")} v={`−${money(returnedValue)}`} currency={cur} cls="discount" />
-                  <SumRow k={t("po.receivedValue")} v={money(receivedValue)} currency={cur} />
-                  <p className="sub" role="status">{t("po.returnNote")}</p>
-                </>
-              )}
-            </TxnTotals>
+            />
+            {returnedQty > 0 && <p className="sub" style={{ margin: "12px 0 0" }}>{t("po.returnNote")}</p>}
           </Card>
         }
       >
@@ -201,7 +189,7 @@ export default function PurchaseOrderDetail() {
               received and billed figures — the reason to open this screen —
               on the card rather than behind "More". */}
           <LineItems<Line>
-            rows={data.items ?? []}
+            rows={lines}
             collapse={false}
             fields={[
               {
@@ -211,6 +199,10 @@ export default function PurchaseOrderDetail() {
               {
                 key: "qty", label: t("dn.qty"), slot: "primary", numeric: true,
                 render: (row) => <>{qty(row.qty)} {row.uom}</>,
+              },
+              {
+                key: "rate", label: t("sod.col.rate"), numeric: true,
+                render: (row) => money(row.rate),
               },
               {
                 key: "received", label: t("po.received"), numeric: true,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import frappe
 
 from taxmate.uae.constants import (
+	UAE_BILINGUAL_PAYMENT,
 	UAE_COUNTRY,
 	UAE_TAX_PRINT_FORMATS,
 	UAE_VAT_TAX_TEMPLATES,
@@ -60,7 +61,7 @@ def ensure_company_uae_ready(company: str) -> None:
 
 
 def _ensure_print_formats_enabled() -> None:
-	for name in UAE_TAX_PRINT_FORMATS:
+	for name in (*UAE_TAX_PRINT_FORMATS, UAE_BILINGUAL_PAYMENT):
 		if frappe.db.exists("Print Format", name):
 			frappe.db.set_value("Print Format", name, "disabled", 0)
 

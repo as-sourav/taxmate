@@ -15,6 +15,7 @@ import MobileNav, { useIsMobileShell } from "./MobileNav";
 import "../styles/phone-fixes.css";
 import { navIcon, sectionIcon } from "./navIcons";
 import { CaptureDesk } from "../screens/dashboard/CaptureDesk";
+import TaxMateMark from "./TaxMateMark";
 
 const RAIL_KEY = "taxmate-rail";
 const OPEN_KEY = "taxmate-nav-open";
@@ -166,7 +167,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {!mobile && (
       <nav className="rail">
         <div className="rbrand">
-          <span className="mark">T</span>
+          <TaxMateMark size={32} />
           <span>TaxMate</span>
         </div>
         <div className="rail-body" onScroll={collapsed ? () => setFly(null) : undefined}>
@@ -251,7 +252,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           )}
           {mobile && (
           <div className="mnav-brand">
-            <span className="mark" aria-hidden="true">T</span>
+            <TaxMateMark size={26} />
             <span>TaxMate</span>
           </div>
           )}

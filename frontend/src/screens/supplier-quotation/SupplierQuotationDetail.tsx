@@ -16,16 +16,22 @@ import { canCancelSales, canSubmitSales, canWrite } from "../../lib/roles";
 import { confirmCancel } from "../../lib/workflow";
 import { date, money } from "../../lib/format";
 import { t } from "../../i18n/strings";
-import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow, SumRow } from "../../components/ui";
+import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow } from "../../components/ui";
+import { TxnTotals } from "../../components/txnFields";
+import { productDiscountTotal, readDiscountBasis } from "../../lib/txn";
 import DocHistory from "../../components/DocHistory";
 import LineItems, { type LineField } from "../../components/LineItems";
 import { isNative } from "../../mobile/platform";
 
-type Line = { item_code?: string; item_name?: string; qty?: number; rate?: number; amount?: number; uom?: string };
+type Line = {
+  item_code?: string; item_name?: string; qty?: number; rate?: number; amount?: number; uom?: string;
+  price_list_rate?: number; discount_percentage?: number; discount_amount?: number;
+};
 type Doc = {
   name: string; supplier?: string; supplier_name?: string; transaction_date?: string;
-  valid_till?: string; status?: string; grand_total?: number; net_total?: number;
+  valid_till?: string; status?: string; total?: number; grand_total?: number; net_total?: number;
   total_taxes_and_charges?: number; currency?: string; docstatus?: number; items?: Line[];
+  discount_amount?: number; additional_discount_percentage?: number; apply_discount_on?: string;
 };
 
 function sqPill(status?: string): string {
@@ -173,9 +179,20 @@ export default function SupplierQuotationDetail() {
             },
           ] as LineField<Line>[]}
         />
-        <SumRow k={t("sq.subtotal")} v={`${cur} ${money(data.net_total)}`} />
-        {data.total_taxes_and_charges ? <SumRow k={t("sq.taxes")} v={`${cur} ${money(data.total_taxes_and_charges)}`} /> : null}
-        <SumRow k={t("sq.total")} v={`${cur} ${money(data.grand_total)}`} />
+        <TxnTotals
+          currency={cur}
+          itemsTotal={data.total}
+          productDiscount={productDiscountTotal(data.items ?? [])}
+          orderDiscount={data.discount_amount}
+          orderDiscountPercent={data.additional_discount_percentage}
+          discountOn={readDiscountBasis(data.apply_discount_on, Number(data.discount_amount) > 0)}
+          net={data.net_total}
+          vat={data.total_taxes_and_charges}
+          grand={data.grand_total}
+          netLabel={t("sod.net")}
+          vatLabel={t("sq.taxes")}
+          grandLabel={t("sq.total")}
+        />
       </Card>
     </>
   );
