@@ -18,6 +18,7 @@ from taxmate.idp.desk import (
 	file_read_error,
 	finish_draft,
 	header_updates,
+	keep_known_fields,
 	match_filters,
 	matches_from_rows,
 	plan_run,
@@ -627,9 +628,10 @@ def _run_create(planned: dict, file_url: str) -> dict:
 		)
 	except frappe.PermissionError:
 		return {"ok": False, "error_key": "idp.denied"}
-	except Exception:
+	except Exception as exc:
 		frappe.log_error(title="TaxMate IDP persist scan failed", message=frappe.get_traceback())
-		return {"ok": False, "error_key": "idp.readFailed", "detail": "Could not create Scan"}
+		kind = type(exc).__name__
+		return {"ok": False, "error_key": "idp.readFailed", "detail": f"Could not create Scan ({kind})"}
 
 	try:
 		enqueue_scan(
@@ -772,22 +774,41 @@ def _save_create(
 	)
 	if not instructions.get("ok"):
 		return instructions
+	doctype = str(instructions.get("doctype") or "")
 	header, items = finish_draft(
 		instructions["header"],
 		instructions.get("items") or [],
 		_fills(fills),
-		_draft_defaults(instructions.get("items") or [], instructions.get("doctype") or ""),
+		_draft_defaults(instructions.get("items") or [], doctype),
 	)
+	from taxmate.idp.masters import (
+		bind_typed_customer,
+		ensure_named_items,
+		fold_printed_discounts,
+		keep_supplier_invoice_date,
+	)
+
+	bind_typed_customer(header, doctype)
+	keep_supplier_invoice_date(header, doctype)
+	fold_printed_discounts(header, items)
+	ensure_named_items(items)
+	printed_vat = header.get("tax_total") or header.get("total_taxes_and_charges")
+	header, items = _document_fields(doctype, header, items)
 	instructions["header"] = header
 	instructions["items"] = items
 	instructions["submit"] = False
 	from idp.tools.create_document import create_document
 
-	ctx = _context(instructions["doctype"], extracted.get("ocr_language") or "en")
+	ctx = _context(doctype, extracted.get("ocr_language") or "en")
 	result = create_document(instructions, ctx)
 	if not result.success:
 		return _tool_error(result)
 	name = (result.data or {}).get("name")
+	if name:
+		try:
+			_ensure_printed_vat(doctype, name, printed_vat)
+		except Exception:
+			frappe.log_error(title="TaxMate IDP VAT stamp failed", message=frappe.get_traceback())
 	route = planned.get("route")
 	if scan_id and name:
 		try:
@@ -888,9 +909,91 @@ def _refresh_validation(extracted: dict) -> None:
 
 
 
+def _document_fields(doctype: str, header: dict, items: list) -> tuple[dict, list]:
+	if not doctype or not frappe.db.exists("DocType", doctype):
+		return header, items
+	meta = frappe.get_meta(doctype)
+	parent = {df.fieldname for df in meta.fields}
+	child_field = meta.get_field("items")
+	child: set[str] = set()
+	if child_field and child_field.options:
+		child = {df.fieldname for df in frappe.get_meta(child_field.options).fields}
+	return keep_known_fields(header, items, parent, child)
+
+
+def _ensure_printed_vat(doctype: str, name: str, vat_amount) -> None:
+	"""Put the VAT printed on the slip onto the draft. Line rates are already net."""
+	from frappe.utils import flt
+
+	vat = flt(vat_amount)
+	if vat <= 0 or not name or doctype not in ("Purchase Invoice", "Sales Invoice"):
+		return
+	doc = frappe.get_doc(doctype, name)
+	if doc.taxes:
+		# A 5% template can round one fils away from the figure printed on the invoice.
+		current = flt(doc.total_taxes_and_charges)
+		if abs(current - vat) < 0.001 or len(doc.taxes) != 1 or abs(current - vat) > 0.05:
+			return
+		row = doc.taxes[0]
+		row.charge_type = "Actual"
+		row.tax_amount = vat
+		row.rate = 0
+		doc.save()
+		return
+	from taxmate.api.accounts import _stamp_default_taxes
+
+	party = "Supplier" if doctype == "Purchase Invoice" else "Customer"
+	details: dict = {}
+	_stamp_default_taxes(details, doctype, doc.company, party)
+	if details.get("taxes_and_charges"):
+		doc.taxes_and_charges = details["taxes_and_charges"]
+	for row in details.get("taxes") or []:
+		doc.append("taxes", row)
+	if not doc.taxes:
+		account = frappe.db.get_value(
+			"Account",
+			{"company": doc.company, "account_type": "Tax", "is_group": 0},
+			"name",
+		)
+		if not account:
+			return
+		doc.append(
+			"taxes",
+			{
+				"charge_type": "Actual",
+				"account_head": account,
+				"tax_amount": vat,
+				"description": "VAT",
+				"add_deduct_tax": "Add",
+				"category": "Total",
+			},
+		)
+	doc.save()
+
+
+def _customer_names() -> list[str]:
+	try:
+		rows = frappe.get_all(
+			"Customer",
+			fields=["name", "customer_name"],
+			limit=200,
+			order_by="modified desc",
+		)
+	except Exception:
+		return []
+	names: list[str] = []
+	for row in rows:
+		label = str(row.customer_name or row.name or "").strip()
+		if label and label not in names:
+			names.append(label)
+	return names
+
+
 def _prefill_writes(review: dict) -> None:
 	defaults = _draft_defaults([])
 	for row in review.get("writes") or []:
+		if row.get("field") == "customer" and not row.get("options"):
+			row["options"] = _customer_names()
 		if row.get("value"):
 			continue
 		if row.get("field") == "cost_center" and defaults.get("cost_center"):
