@@ -349,7 +349,8 @@ export default function SalesOrderCreate() {
           <Card title={t("txn.getItemsFrom")}>
             <SourceDocPicker
               sources={[
-                { label: t("nav.quotations"), doctype: DT.quotation, method: METHOD.makeQuotationSO, arg: "source_name" },
+                { label: t("nav.quotations"), doctype: DT.quotation, method: METHOD.makeQuotationSO, arg: "source_name",
+                  filters: [["docstatus", "=", 1], ["status", "not in", ["Lost", "Ordered"]]] },
               ]}
               onMapped={applyMapped}
             />

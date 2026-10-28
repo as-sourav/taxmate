@@ -12,7 +12,7 @@ import { useSession } from "../../lib/session";
 import { canSubmitSales } from "../../lib/roles";
 import { money, parseNum, toIsoDate } from "../../lib/format";
 import { INV_PILL_CLASS, invoiceUiStatus } from "../../lib/status";
-import { applyLineRate, linePayload, orderDiscountFields, productDiscountTotal, readDiscountBasis, stampItemDetails, useCreditBalance, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type DiscountBasis, type PartyDetails, type TxnLine } from "../../lib/txn";
+import { applyLineRate, linePayload, mappedItem, orderDiscountFields, productDiscountTotal, readDiscountBasis, stampItemDetails, useCreditBalance, usePaymentSchedule, useTotalsPreview, useTransactionRpc, type DiscountBasis, type PartyDetails, type TxnLine } from "../../lib/txn";
 import { CreditLimitNotice, LineDiscountInput, LineTrack, OrderDiscountFields, PartyFields, PaymentScheduleTable, TxnTotals } from "../../components/txnFields";
 import { UAE_EMIRATES } from "../../types/uae";
 import { t } from "../../i18n/strings";
@@ -310,7 +310,10 @@ export default function InvoiceForm() {
             mode_of_payment: r.mode_of_payment,
           }))
         : undefined,
-      items: lines.map((l) => linePayload(l)),
+      items: lines.map((l) => ({
+        ...linePayload(l),
+        warehouse: l.warehouse || (updateStock ? setWarehouse || undefined : undefined),
+      })),
     };
   }
 
@@ -323,21 +326,10 @@ export default function InvoiceForm() {
     if (mapped.taxes_and_charges) setTaxTemplate(String(mapped.taxes_and_charges));
     if (mapped.payment_terms_template) setPaymentTerms(String(mapped.payment_terms_template));
     if (mapped.po_no) setPoNo(String(mapped.po_no));
+    if (mapped.update_stock != null) setUpdateStock(mapped.update_stock ? 1 : 0);
+    if (mapped.set_warehouse) setSetWarehouse(String(mapped.set_warehouse));
     const items = (mapped.items as TxnLine[] | undefined) ?? [];
-    setLines(
-      items.map((l) => ({
-        item_code: l.item_code || "",
-        item_name: l.item_name,
-        qty: Number(l.qty) || 1,
-        rate: Number(l.rate) || 0,
-        uom: l.uom,
-        income_account: l.income_account,
-        cost_center: l.cost_center,
-        uae_item_type: l.uae_item_type,
-        hs_code: l.hs_code,
-        sac_code: l.sac_code,
-      })),
-    );
+    setLines(items.map((l) => mappedItem(l, String(mapped.set_warehouse || ""))));
   }
 
   async function save() {
@@ -439,8 +431,10 @@ export default function InvoiceForm() {
             <Card title={t("txn.getItemsFrom")}>
               <SourceDocPicker
                 sources={[
-                  { label: t("nav.salesOrders"), doctype: DT.salesOrder, method: METHOD.makeSalesInvoice, arg: "source_name" },
-                  { label: t("nav.deliveryNotes"), doctype: DT.deliveryNote, method: METHOD.makeDnSalesInvoice, arg: "source_name" },
+                  { label: t("nav.salesOrders"), doctype: DT.salesOrder, method: METHOD.makeSalesInvoice, arg: "source_name",
+                    filters: [["docstatus", "=", 1], ["status", "not in", ["Closed", "On Hold"]], ["per_billed", "<", 99.99]] },
+                  { label: t("nav.deliveryNotes"), doctype: DT.deliveryNote, method: METHOD.makeDnSalesInvoice, arg: "source_name",
+                    filters: [["docstatus", "=", 1], ["is_return", "=", 0], ["status", "not in", ["Stopped", "Closed"]], ["per_billed", "<", 100]] },
                 ]}
                 onMapped={(m) => void applyMapped(m)}
               />

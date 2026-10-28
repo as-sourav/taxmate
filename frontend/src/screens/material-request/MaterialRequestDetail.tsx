@@ -11,6 +11,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { useOpenMapped } from "../../lib/openMapped";
 import { confirmCancel } from "../../lib/workflow";
 import { useDeleteDraftAction } from "../../lib/useDraftDelete";
 import { useDoc, useInsert } from "../../lib/resource";
@@ -27,6 +28,7 @@ import LineItems, { type LineField } from "../../components/LineItems";
 type Line = {
   item_code?: string; item_name?: string; qty?: number; uom?: string; warehouse?: string;
   schedule_date?: string; ordered_qty?: number; received_qty?: number;
+  stock_qty?: number; picked_qty?: number;
 };
 type Doc = {
   name: string; material_request_type?: string; transaction_date?: string; schedule_date?: string;
@@ -69,8 +71,14 @@ export default function MaterialRequestDetail() {
   const suppliersCall = useFrappePostCall<{ message: Omit<PendingRow, "qty">[] }>(METHOD.mrDefaultSuppliers);
   const makeMany = useFrappePostCall<{ message: string[] }>(METHOD.makeMrPOs);
   const makeSE = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeMrSE);
+  const makeSq = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeMrSupplierQuotation);
+  const makeRfq = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeRfqFromMaterialRequest);
+  const rfq = useOpenMapped("/request-for-quotations");
+  const makePick = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeMrPickList);
+  const makeWo = useFrappePostCall<{ message: { names?: string[] } }>(METHOD.makeMrWorkOrders);
+  const stopCall = useFrappePostCall(METHOD.setMaterialRequestStatus);
   const create = useInsert();
-  const [busy, setBusy] = useState<"" | "po" | "se">("");
+  const [busy, setBusy] = useState<"" | "po" | "se" | "sq" | "pick" | "wo">("");
   const [mapError, setMapError] = useState<unknown>(null);
   const [poRows, setPoRows] = useState<PendingRow[] | null>(null);
   const [tab, setTab] = useState<"details" | "terms" | "more">("details");
@@ -84,6 +92,11 @@ export default function MaterialRequestDetail() {
   const draft = data.docstatus === 0;
   const submitted = data.docstatus === 1;
   const isPurchase = data.material_request_type === "Purchase" || data.material_request_type === "Subcontracting";
+  const openOrder = submitted && data.status !== "Stopped" && (data.per_ordered ?? 0) < 100;
+  const canStop = submitted && data.status !== "Stopped" && (data.per_received ?? 0) < 100;
+  const canPick = openOrder && data.material_request_type === "Material Transfer"
+    && (data.items ?? []).some((row) => Number(row.stock_qty) > Number(row.picked_qty || 0));
+  const canManufacture = openOrder && data.material_request_type === "Manufacture";
   const isTransferOrIssue = data.material_request_type === "Material Transfer"
     || data.material_request_type === "Material Issue"
     || data.material_request_type === "Customer Provided";
@@ -151,6 +164,69 @@ export default function MaterialRequestDetail() {
     }
   }
 
+  async function createPickList() {
+    setBusy("pick");
+    setMapError(null);
+    try {
+      const res = await makePick.call({ source_name: name });
+      const mapped = res?.message;
+      if (!mapped) throw new Error(t("txn.mapEmpty"));
+      const body: Record<string, unknown> = { ...mapped };
+      delete body.name; delete body.doctype; delete body.__islocal; delete body.__unsaved;
+      const created = await create.createDoc(DT.pickList, body) as { name: string };
+      nav(`/pick-lists/${encodeURIComponent(created.name)}`);
+    } catch (err) {
+      setMapError(err);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function createWorkOrders() {
+    setBusy("wo");
+    setMapError(null);
+    try {
+      const res = await makeWo.call({ source_name: name });
+      const next = res?.message?.names?.[0];
+      if (!next) throw new Error(t("txn.mapEmpty"));
+      nav(`/work-orders/${encodeURIComponent(next)}`);
+    } catch (err) {
+      setMapError(err);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function stopRequest() {
+    setMapError(null);
+    try {
+      await stopCall.call({ name, status: "Stopped" });
+      await mutate();
+    } catch (err) {
+      setMapError(err);
+    }
+  }
+
+  async function createSupplierQuotation() {
+    setBusy("sq");
+    setMapError(null);
+    try {
+      const res = await makeSq.call({ source_name: name });
+      const mapped = res?.message;
+      if (!mapped) throw new Error(t("txn.mapEmpty"));
+      const body: Record<string, unknown> = { ...mapped };
+      delete body.name;
+      delete body.doctype;
+      delete body.__islocal;
+      delete body.__unsaved;
+      nav("/supplier-quotations/new", { state: { mapped: body } });
+    } catch (err) {
+      setMapError(err);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function createStockEntry() {
     setBusy("se");
     setMapError(null);
@@ -202,6 +278,33 @@ export default function MaterialRequestDetail() {
                 {busy === "po" ? t("soc.saving") : t("mr.makePO")}
               </button>
             )}
+            {submitted && data.material_request_type === "Purchase" && data.status !== "Stopped" && (data.per_ordered ?? 0) < 100 && (
+              <>
+              <button type="button" className="btn ghost" disabled={!!busy}
+                onClick={() => void createSupplierQuotation()}>
+                {busy === "sq" ? t("soc.saving") : t("nav.supplierQuotations")}
+              </button>
+              <button type="button" className="btn ghost" disabled={!!busy || rfq.busy}
+                onClick={() => void rfq.open(() => makeRfq.call({ source_name: name }))}>
+                Request for Quotation
+              </button>
+              </>
+            )}
+            {canPick && (
+              <button type="button" className="btn ghost" disabled={!!busy} onClick={() => void createPickList()}>
+                {busy === "pick" ? t("soc.saving") : t("nav.pickLists")}
+              </button>
+            )}
+            {canManufacture && (
+              <button type="button" className="btn ghost" disabled={!!busy} onClick={() => void createWorkOrders()}>
+                {busy === "wo" ? t("soc.saving") : t("nav.workOrders")}
+              </button>
+            )}
+            {canStop && (
+              <button type="button" className="btn quiet" disabled={stopCall.loading} onClick={() => void stopRequest()}>
+                Stop
+              </button>
+            )}
             {submitted && isTransferOrIssue && (
               <button type="button" className="btn ghost" disabled={!!busy}
                 onClick={() => void createStockEntry()}>
@@ -236,8 +339,8 @@ export default function MaterialRequestDetail() {
         </p>
       </PageHead>
 
-      {(submitCall.error || cancelCall.error || amendCall.error || mapError) && (
-        <ErrorBox error={submitCall.error || cancelCall.error || amendCall.error || mapError} />
+      {(submitCall.error || cancelCall.error || amendCall.error || mapError || rfq.error) && (
+        <ErrorBox error={submitCall.error || cancelCall.error || amendCall.error || mapError || rfq.error} />
       )}
 
       <div className="ftabs" role="tablist">

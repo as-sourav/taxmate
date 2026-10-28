@@ -2,6 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { useOpenMapped } from "../../lib/openMapped";
 import { PrintLangButtons } from "../../components/PrintLangButtons";
 import { useDoc } from "../../lib/resource";
 import { useSession } from "../../lib/session";
@@ -31,7 +32,7 @@ type Doc = {
   discount_amount?: number; additional_discount_percentage?: number; apply_discount_on?: string;
   outstanding_amount?: number; currency?: string; total_advance?: number;
   allocate_advances_automatically?: number; advances?: unknown[];
-  docstatus?: 0 | 1 | 2; status?: string; uae_e_invoice_status?: string;
+  docstatus?: 0 | 1 | 2; status?: string; is_return?: number; on_hold?: number; uae_e_invoice_status?: string;
   items?: Line[];
 };
 
@@ -75,6 +76,8 @@ export default function PurchaseInvoiceDetail() {
   const submitCall = useFrappePostCall(METHOD.submit);
   const cancelCall = useFrappePostCall(METHOD.cancel);
   const amendCall = useFrappePostCall<{ message: { name: string } }>(METHOD.amend);
+  const makePayReq = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makePaymentRequest);
+  const paymentRequest = useOpenMapped("/payment-requests");
 
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} onRetry={() => mutate()} />;
@@ -88,7 +91,7 @@ export default function PurchaseInvoiceDetail() {
   const paid = Math.max(grand - outstanding, 0);
   const canSubmit = canSubmitSales(session.roles);
   const canCancel = canCancelSales(session.roles) && !eInvoiceLocked(data.uae_e_invoice_status);
-  const busyError = submitCall.error || cancelCall.error || amendCall.error || deleteAction.error || payments.error;
+  const busyError = submitCall.error || cancelCall.error || amendCall.error || deleteAction.error || payments.error || paymentRequest.error;
 
   const allocations = Object.values(
     (payments.data?.message ?? [])
@@ -134,14 +137,19 @@ export default function PurchaseInvoiceDetail() {
             }}
             extra={
               <>
-                {submitted && outstanding > 0 && (
+                {submitted && outstanding !== 0 && !data.on_hold && (
                   <button type="button" className="btn"
-                    onClick={() => nav(`/payments/new?type=Pay&invoice=${encodeURIComponent(name)}`)}>
+                    onClick={() => nav(`/payments/new?dt=${encodeURIComponent(DT.purchaseInvoice)}&dn=${encodeURIComponent(name)}`)}>
                     {t("pi.pay")}
                   </button>
                 )}
-                {/* DebitNoteForm route. User: Implement the plan… complete all the to-dos. */}
-                {submitted && (
+                {submitted && !data.is_return && !data.on_hold && outstanding > 0 && (
+                  <button type="button" className="btn ghost" disabled={paymentRequest.busy}
+                    onClick={() => void paymentRequest.open(() => makePayReq.call({ reference_doctype: DT.purchaseInvoice, reference_name: name }))}>
+                    Payment Request
+                  </button>
+                )}
+                {submitted && !data.is_return && (outstanding >= 0 || Math.abs(outstanding) < grand) && (
                   <button type="button" className="btn ghost"
                     onClick={() => nav(`/purchase-invoices/${encodeURIComponent(name)}/return`)}>
                     {t("pi.debit")}

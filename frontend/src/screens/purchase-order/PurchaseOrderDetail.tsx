@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { useOpenMapped } from "../../lib/openMapped";
 import { useDoc, useInsert } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canWrite } from "../../lib/roles";
@@ -13,14 +14,16 @@ import { lineHasProductDiscount, productDiscountTotal, readDiscountBasis } from 
 import { Card, ErrorBox, Loading, PageHead, Pill, ReadRow } from "../../components/ui";
 import { FormLayout } from "../../components/form";
 import DetailActions from "../../components/DetailActions";
+import UpdateItems from "../../components/UpdateItems";
 import LineItems, { type LineField } from "../../components/LineItems";
 import { useDeleteDraftAction } from "../../lib/useDraftDelete";
 import { printDocUrl } from "../../lib/printDoc";
 import { isNative } from "../../mobile/platform";
 
 type Line = {
+  name?: string;
   item_code?: string; item_name?: string; qty?: number; received_qty?: number;
-  returned_qty?: number;
+  returned_qty?: number; delivered_by_supplier?: number; subcontracted_qty?: number;
   billed_amt?: number; uom?: string; rate?: number; amount?: number;
   price_list_rate?: number; discount_percentage?: number; discount_amount?: number;
 };
@@ -30,6 +33,7 @@ type Doc = {
   total?: number; grand_total?: number; net_total?: number; total_taxes_and_charges?: number;
   discount_amount?: number; additional_discount_percentage?: number; apply_discount_on?: string;
   docstatus?: number; per_received?: number; per_billed?: number;
+  is_subcontracted?: number; is_old_subcontracting_flow?: number;
   items?: Line[];
 };
 
@@ -55,8 +59,17 @@ export default function PurchaseOrderDetail() {
   const canSubmit = canWrite(session);
   const canCancel = canWrite(session);
   const create = useInsert();
+  const setStatus = useFrappePostCall(METHOD.setPurchaseOrderStatus);
+  const dropshipCall = useFrappePostCall(METHOD.updateDropshipQty);
+  const makePayReq = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makePaymentRequest);
+  const makeSub = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeSubcontractingOrder);
+  const paymentRequest = useOpenMapped("/payment-requests");
+  const subcontract = useOpenMapped("/subcontracting-orders");
   const [busy, setBusy] = useState<"" | "pr" | "pi">("");
+  const [holdReason, setHoldReason] = useState("");
   const [mapError, setMapError] = useState<unknown>(null);
+  const [statusError, setStatusError] = useState<unknown>(null);
+  const [dropRows, setDropRows] = useState<{ name: string; item_code?: string; qty?: number; received_qty?: number; qty_change: number; selected: boolean }[] | null>(null);
 
   async function createDownstream(kind: "pr" | "pi") {
     setBusy(kind);
@@ -91,6 +104,48 @@ export default function PurchaseOrderDetail() {
   const lines = data.items ?? [];
   const showLineDiscount = lines.some(lineHasProductDiscount);
   const returnedQty = lines.reduce((sum, row) => sum + (Number(row.returned_qty) || 0), 0);
+  const held = data.status === "On Hold";
+  const stopped = data.status === "Closed" || data.status === "Delivered";
+  const stillOpen = (data.per_received ?? 0) < 100 || (data.per_billed ?? 0) < 100;
+  const canReceive = data.docstatus === 1 && !held && data.status !== "Closed" && lines.some((row) => {
+    if (row.delivered_by_supplier) return false;
+    return Number(row.received_qty) < Number(row.qty);
+  });
+  const canBill = data.docstatus === 1 && !held && data.status !== "Closed" && (data.per_billed ?? 0) < 100;
+  const canChange = writable && data.docstatus === 1 && !stopped && stillOpen;
+  const canDropship = writable && data.docstatus === 1
+    && !["Closed", "Delivered", "Completed"].includes(data.status || "")
+    && lines.some((row) => row.delivered_by_supplier);
+
+  async function saveDropship() {
+    const chosen = (dropRows ?? []).filter((row) => row.selected && row.qty_change);
+    if (!chosen.length) {
+      setMapError(new Error(t("doc.err.mapFailed")));
+      return;
+    }
+    setMapError(null);
+    try {
+      await dropshipCall.call({
+        name,
+        items: chosen.map((row) => ({ name: row.name, current_qty: row.received_qty || 0, qty_change: row.qty_change })),
+      });
+      setDropRows(null);
+      await mutate();
+    } catch (err) {
+      setMapError(err);
+    }
+  }
+
+  async function changeStatus(status: string, reason?: string) {
+    setStatusError(null);
+    try {
+      await setStatus.call({ name, status, reason });
+      setHoldReason("");
+      await mutate();
+    } catch (err) {
+      setStatusError(err);
+    }
+  }
 
   return (
     <>
@@ -112,7 +167,7 @@ export default function PurchaseOrderDetail() {
               canSubmit={canSubmit}
               canCancel={canCancel}
               canWrite={writable}
-              busy={submitCall.loading || cancelCall.loading || amendCall.loading || !!busy || deleteAction.loading}
+              busy={submitCall.loading || cancelCall.loading || amendCall.loading || setStatus.loading || !!busy || deleteAction.loading}
               onEdit={() => nav(`/purchase-orders/${encodeURIComponent(name)}/edit`)}
               onSubmit={() => void submitCall.call({ doc: { doctype: DT.purchaseOrder, name } }).then(() => mutate())}
             onDelete={deleteAction.onDelete}
@@ -131,16 +186,76 @@ export default function PurchaseOrderDetail() {
                     {t("inv.print")}
                   </button>
                   )}
-                  <button type="button" className="btn ghost"
-                    disabled={!!busy || data.docstatus !== 1 || (data.per_received ?? 0) >= 100}
-                    onClick={() => void createDownstream("pr")}>
+                  {canReceive && (
+                  <button type="button" className="btn ghost" disabled={!!busy} onClick={() => void createDownstream("pr")}>
                     {busy === "pr" ? t("soc.saving") : t("po.receive")}
                   </button>
-                  <button type="button" className="btn"
-                    disabled={!!busy || data.docstatus !== 1 || (data.per_billed ?? 0) >= 100}
-                    onClick={() => void createDownstream("pi")}>
+                  )}
+                  {canBill && (
+                  <button type="button" className="btn" disabled={!!busy} onClick={() => void createDownstream("pi")}>
                     {busy === "pi" ? t("soc.saving") : t("po.bill")}
                   </button>
+                  )}
+                  {canChange && !held && (
+                    <>
+                      <input
+                        className="ctl"
+                        value={holdReason}
+                        aria-label="Reason for hold"
+                        onChange={(event) => setHoldReason(event.target.value)}
+                      />
+                      <button type="button" className="btn ghost" disabled={setStatus.loading || !holdReason.trim()} onClick={() => void changeStatus("On Hold", holdReason)}>
+                        {t("supp.onHold")}
+                      </button>
+                    </>
+                  )}
+                  {canChange && held && (
+                    <button type="button" className="btn ghost" disabled={setStatus.loading} onClick={() => void changeStatus("Draft")}>
+                      Resume
+                    </button>
+                  )}
+                  {canChange && (
+                    <button type="button" className="btn ghost" disabled={setStatus.loading} onClick={() => void changeStatus("Closed")}>
+                      {t("hist.close")}
+                    </button>
+                  )}
+                  {canDropship && (
+                    <button type="button" className="btn ghost" onClick={() => setDropRows(lines.filter((row) => row.delivered_by_supplier && row.name).map((row) => ({
+                      name: row.name || "",
+                      item_code: row.item_code,
+                      qty: row.qty,
+                      received_qty: row.received_qty,
+                      qty_change: Number(row.qty || 0) - Number(row.received_qty || 0),
+                      selected: Number(row.qty || 0) > Number(row.received_qty || 0),
+                    })))}>
+                      Deliver
+                    </button>
+                  )}
+                  {data.docstatus === 1 && data.status !== "Closed" && (data.per_billed ?? 0) < 100 && (
+                    <button type="button" className="btn ghost"
+                      onClick={() => nav(`/payments/new?dt=${encodeURIComponent(DT.purchaseOrder)}&dn=${encodeURIComponent(name)}`)}>
+                      {t("pi.pay")}
+                    </button>
+                  )}
+                  {data.docstatus === 1 && !held && data.status !== "Closed" && (data.per_billed ?? 0) < 100 && (
+                    <button type="button" className="btn ghost" disabled={paymentRequest.busy}
+                      onClick={() => void paymentRequest.open(() => makePayReq.call({ reference_doctype: DT.purchaseOrder, reference_name: name }))}>
+                      Payment Request
+                    </button>
+                  )}
+                  {data.docstatus === 1 && !held && data.status !== "Closed" && !!data.is_subcontracted && !data.is_old_subcontracting_flow
+                    && (data.items ?? []).some((row) => !row.delivered_by_supplier && Number(row.received_qty || 0) < Number(row.qty || 0))
+                    && (data.items ?? []).some((row) => Number(row.qty) !== Number(row.subcontracted_qty || 0)) && (
+                    <button type="button" className="btn ghost" disabled={subcontract.busy}
+                      onClick={() => void subcontract.open(() => makeSub.call({ source_name: name }))}>
+                      Subcontracting Order
+                    </button>
+                  )}
+                  {writable && data.docstatus === 1 && stopped && (
+                    <button type="button" className="btn ghost" disabled={setStatus.loading} onClick={() => void changeStatus("Submitted")}>
+                      Re-open
+                    </button>
+                  )}
                 </>
               }
             />
@@ -153,8 +268,8 @@ export default function PurchaseOrderDetail() {
         </p>
       </PageHead>
 
-      {(mapError || makePr.error || makePi.error) && (
-        <ErrorBox error={submitCall.error ?? cancelCall.error ?? amendCall.error ?? mapError ?? makePr.error ?? makePi.error} />
+      {(mapError || statusError || makePr.error || makePi.error || paymentRequest.error || subcontract.error) && (
+        <ErrorBox error={submitCall.error ?? cancelCall.error ?? amendCall.error ?? statusError ?? mapError ?? makePr.error ?? makePi.error ?? paymentRequest.error ?? subcontract.error} />
       )}
 
       <FormLayout
@@ -183,6 +298,28 @@ export default function PurchaseOrderDetail() {
           </Card>
         }
       >
+        {writable && data.docstatus === 1 && data.status !== "Closed" && data.status !== "Delivered"
+          && (data.per_received ?? 0) < 100 && (data.per_billed ?? 0) < 100 && (
+          <UpdateItems doctype={DT.purchaseOrder} name={name} items={lines} onSaved={() => void mutate()} />
+        )}
+        {dropRows && (
+          <Card title="Deliver">
+            {dropRows.map((row, index) => (
+              <div key={row.name} className="grid3" style={{ marginBottom: 8 }}>
+                <label className="ctl">
+                  <input type="checkbox" checked={row.selected} aria-label={row.item_code || "Item"}
+                    onChange={(event) => setDropRows((current) => (current ?? []).map((item, i) => i === index ? { ...item, selected: event.target.checked } : item))} />
+                  {" "}{row.item_code}
+                </label>
+                <span className="ctl readonly">{row.received_qty ?? 0} / {row.qty ?? 0}</span>
+                <input className="ctl" type="number" aria-label="Quantity" value={row.qty_change}
+                  onChange={(event) => setDropRows((current) => (current ?? []).map((item, i) => i === index ? { ...item, qty_change: Number(event.target.value) } : item))} />
+              </div>
+            ))}
+            <button type="button" className="btn" disabled={dropshipCall.loading} onClick={() => void saveDropship()}>{t("soc.save")}</button>
+            <button type="button" className="btn ghost" onClick={() => setDropRows(null)}>{t("soc.discard")}</button>
+          </Card>
+        )}
         <Card title={t("dn.items")}>
           {/* Read-only progress against the order: ordered, received, billed.
               Nothing is added or removed here, and collapse={false} keeps the

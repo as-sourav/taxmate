@@ -88,8 +88,49 @@ class TestApiCatalog(FrappeTestCase):
 		self.assertIn("taxmate.api.sales_order.linked_documents", methods)
 		self.assertIn("taxmate.api.sales_order.make_delivery_note", methods)
 		self.assertIn("taxmate.api.sales_order.make_sales_invoice", methods)
+		self.assertIn("taxmate.api.sales_order.set_status", methods)
+		self.assertIn("taxmate.api.sales_order.make_pick_list", methods)
+		self.assertIn("taxmate.api.sales_order.make_material_request", methods)
+		self.assertIn("taxmate.api.sales_order.make_work_orders", methods)
+		self.assertIn("taxmate.api.delivery_note.make_from_sales_invoice", methods)
+		self.assertIn("taxmate.api.quotation.declare_lost", methods)
+		self.assertIn("taxmate.api.quotation.make_from_customer", methods)
+		self.assertIn("taxmate.api.lead.make_quotation", methods)
+		self.assertIn("taxmate.api.supplier_quotation.make_quotation", methods)
+		self.assertIn("taxmate.api.material_request.make_supplier_quotation", methods)
+		self.assertIn("taxmate.api.accounts.update_items", methods)
+		self.assertIn("taxmate.api.accounts.can_update_items", methods)
+		self.assertIn("taxmate.api.sales_order.get_work_order_items", methods)
+		self.assertIn("taxmate.api.quotation.sales_order_allowed", methods)
+		self.assertIn("taxmate.api.purchase_order.update_dropship_received_qty", methods)
+		self.assertIn("taxmate.api.purchase_receipt.make_stock_entry", methods)
+		self.assertIn("taxmate.api.material_request.make_pick_list", methods)
+		self.assertIn("taxmate.api.material_request.raise_work_orders", methods)
+		self.assertIn("taxmate.api.material_request.set_status", methods)
+		self.assertIn("Opportunity", doctypes)
+		self.assertIn("Request for Quotation", doctypes)
+		self.assertIn("Shipment", doctypes)
+		self.assertIn("Installation Note", doctypes)
+		self.assertIn("Delivery Trip", doctypes)
+		self.assertIn("Payment Request", doctypes)
+		self.assertIn("Subcontracting Order", doctypes)
+		self.assertIn("Subcontracting Inward Order", doctypes)
+		self.assertIn("taxmate.api.linked_docs.make_opportunity_from_customer", methods)
+		self.assertIn("taxmate.api.linked_docs.make_opportunity_from_lead", methods)
+		self.assertIn("taxmate.api.linked_docs.make_quotation_from_opportunity", methods)
+		self.assertIn("taxmate.api.linked_docs.make_rfq_from_material_request", methods)
+		self.assertIn("taxmate.api.linked_docs.make_supplier_rfq", methods)
+		self.assertIn("taxmate.api.linked_docs.make_shipment_from_delivery_note", methods)
+		self.assertIn("taxmate.api.linked_docs.make_installation_note_from_delivery_note", methods)
+		self.assertIn("taxmate.api.linked_docs.make_delivery_trip_from_delivery_note", methods)
+		self.assertIn("taxmate.api.linked_docs.make_payment_request", methods)
+		self.assertIn("taxmate.api.linked_docs.make_subcontracting_order_from_purchase_order", methods)
+		self.assertIn("taxmate.api.linked_docs.make_subcontracting_inward_from_sales_order", methods)
+		self.assertIn("taxmate.api.delivery_note.set_status", methods)
 		self.assertIn("taxmate.api.purchase_order.make_purchase_receipt", methods)
 		self.assertIn("taxmate.api.purchase_order.make_purchase_invoice", methods)
+		self.assertIn("taxmate.api.purchase_order.set_status", methods)
+		self.assertIn("taxmate.api.purchase_receipt.set_status", methods)
 		# Catalogued for SPA DN→SI / PR→PI / item on-hand (Phase 0-3).
 		# User: Implement the plan as specified… complete all the to-dos.
 		self.assertIn("taxmate.api.delivery_note.make_sales_invoice", methods)
@@ -798,6 +839,19 @@ class TestApiVoucherHappyPath(FrappeTestCase):
 		self.assertEqual(int(mapped.get("docstatus") or 0), 0)
 		self.assertTrue(mapped.get("items"))
 		self.assertTrue(mapped.get("__islocal") or str(mapped.get("name") or "").startswith("new-"))
+
+		from taxmate.api.purchase_order import set_status
+
+		closed = set_status(submitted["name"], "Closed")
+		self.assertEqual(closed["status"], "Closed")
+		with self.assertRaises(frappe.ValidationError):
+			make_purchase_receipt(submitted["name"])
+		reopened = set_status(submitted["name"], "Submitted")
+		self.assertNotIn(reopened["status"], ("Closed", "On Hold"))
+		held = set_status(submitted["name"], "On Hold", reason="Waiting for the supplier")
+		self.assertEqual(held["status"], "On Hold")
+		with self.assertRaises(frappe.ValidationError):
+			make_purchase_receipt(submitted["name"])
 
 		cancelled = cancel("Purchase Order", doc["name"])
 		self.assertEqual(cancelled["docstatus"], 2)
@@ -1981,4 +2035,134 @@ class TestUaeTaxSettingsApi(FrappeTestCase):
 				"archive_retention_years": before.get("archive_retention_years") or 5,
 			}
 		)
+
+
+class TestDeskWriteGates(FrappeTestCase):
+	"""Behavioral checks for the Desk actions the SPA now calls."""
+
+	def test_gates_reject_blank_or_unknown_input(self):
+		from taxmate.api.accounts import can_update_items, make_purchase_return, update_items
+		from taxmate.api.material_request import set_status as stop_request
+		from taxmate.api.quotation import declare_lost, sales_order_allowed
+		from taxmate.api.sales_order import make_work_orders, set_status
+
+		for value in ("", "   ", None):
+			with self.assertRaises(frappe.ValidationError):
+				make_purchase_return(value)
+		with self.assertRaises(frappe.ValidationError):
+			update_items("Note", "X", [{"item_code": "A", "qty": 1, "rate": 1}])
+		with self.assertRaises(frappe.ValidationError):
+			update_items("Sales Order", "SO-MISSING", [])
+		with self.assertRaises(frappe.ValidationError):
+			can_update_items("Sales Order", "")
+		with self.assertRaises(frappe.ValidationError):
+			set_status("SO-MISSING", "Banana")
+		with self.assertRaises(frappe.ValidationError):
+			make_work_orders("", [])
+		with self.assertRaises(frappe.ValidationError):
+			declare_lost("QTN-MISSING", "")
+		with self.assertRaises(frappe.ValidationError):
+			sales_order_allowed("")
+		with self.assertRaises(frappe.ValidationError):
+			stop_request("MR-MISSING", "Closed")
+		from taxmate.api.linked_docs import (
+			make_delivery_trip_from_delivery_note,
+			make_opportunity_from_lead,
+			make_payment_request,
+			make_rfq_from_material_request,
+			make_shipment_from_delivery_note,
+			make_subcontracting_inward_from_sales_order,
+			make_subcontracting_order_from_purchase_order,
+			make_supplier_rfq,
+		)
+
+		for value in ("", "   ", None):
+			with self.assertRaises(frappe.ValidationError):
+				make_opportunity_from_lead(value)
+			with self.assertRaises(frappe.ValidationError):
+				make_shipment_from_delivery_note(value)
+			with self.assertRaises(frappe.ValidationError):
+				make_supplier_rfq(value)
+		with self.assertRaises(frappe.ValidationError):
+			make_payment_request("Note", "X")
+		with self.assertRaises(frappe.ValidationError):
+			make_payment_request("Sales Invoice", "")
+		with self.assertRaises(frappe.ValidationError):
+			make_rfq_from_material_request("")
+		with self.assertRaises(frappe.ValidationError):
+			make_delivery_trip_from_delivery_note("   ")
+		with self.assertRaises(frappe.ValidationError):
+			make_subcontracting_order_from_purchase_order("")
+		with self.assertRaises(frappe.ValidationError):
+			make_subcontracting_inward_from_sales_order(None)
+
+	def test_shipment_row_names_the_delivery_note(self):
+		from taxmate.api.linked_docs import shipment_delivery_row
+
+		row = shipment_delivery_row("DN-1", 25, [10, 15])
+		self.assertEqual(row["delivery_note"], "DN-1")
+		self.assertEqual(row["grand_total"], 25)
+		fallback = shipment_delivery_row("DN-1", 0, [10, 15])
+		self.assertEqual(fallback["grand_total"], 25)
+
+	def test_sales_order_hold_resume_and_update_qty(self):
+		from taxmate.api.accounts import can_update_items, update_items
+		from taxmate.api.sales_order import set_status
+		from taxmate.api.workflow import cancel, submit
+		from taxmate.tests.uae_prove_fixtures import SERVICE_ITEM, WALK_IN, _ensure_walk_in, require_prove_site
+
+		try:
+			company = require_prove_site()
+		except frappe.DoesNotExistError as exc:
+			self.skipTest(str(exc))
+		_ensure_walk_in()
+		doc = insert(
+			{
+				"doctype": "Sales Order",
+				"company": company,
+				"customer": WALK_IN,
+				"order_type": "Sales",
+				"transaction_date": "2026-11-15",
+				"delivery_date": "2026-11-30",
+				"vat_emirate": "Dubai",
+				"currency": "AED",
+				"conversion_rate": 1,
+				"selling_price_list": "Standard Selling",
+				"price_list_currency": "AED",
+				"plc_conversion_rate": 1,
+				"taxes_and_charges": "UAE VAT 5% - TM",
+				"items": [{"item_code": SERVICE_ITEM, "qty": 1, "rate": 100, "delivery_date": "2026-11-30"}],
+			}
+		)
+		submitted = submit({"doctype": "Sales Order", "name": doc["name"]})
+		self.assertEqual(can_update_items("Sales Order", doc["name"])["allowed"], 1)
+		held = set_status(doc["name"], "On Hold", "waiting")
+		self.assertEqual(held["status"], "On Hold")
+		row = submitted["items"][0]
+		update_items(
+			"Sales Order",
+			doc["name"],
+			[{
+				"docname": row["name"],
+				"item_code": row["item_code"],
+				"qty": 2,
+				"rate": row["rate"],
+				"uom": row.get("uom"),
+				"conversion_factor": row.get("conversion_factor") or 1,
+				"description": row.get("description"),
+				"delivery_date": str(row.get("delivery_date") or "2026-11-30"),
+				"warehouse": row.get("warehouse"),
+				"fg_item": row.get("fg_item"),
+				"fg_item_qty": row.get("fg_item_qty"),
+			}],
+		)
+		fetched = get("Sales Order", doc["name"])
+		self.assertEqual(flt_qty(fetched["items"][0]["qty"]), 2)
+		resumed = set_status(doc["name"], "Draft")
+		self.assertNotEqual(resumed["status"], "On Hold")
+		cancel("Sales Order", doc["name"])
+
+
+def flt_qty(value) -> float:
+	return float(value or 0)
 

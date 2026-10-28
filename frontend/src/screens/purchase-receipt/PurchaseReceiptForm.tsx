@@ -10,7 +10,7 @@ import { useDoc, useDocList, useInsert, useSave } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canSubmitSales, canWrite } from "../../lib/roles";
 import { money, parseNum, toIsoDate } from "../../lib/format";
-import { linePayload, stampItemDetails, useTotalsPreview, useTransactionRpc, type PartyDetails, type TxnLine } from "../../lib/txn";
+import { linePayload, mappedItem, stampItemDetails, useTotalsPreview, useTransactionRpc, type PartyDetails, type TxnLine } from "../../lib/txn";
 import { ExchangeRateField, LineTrack, PartyFields } from "../../components/txnFields";
 import { t } from "../../i18n/strings";
 import { Card, ErrorBox, Field, Loading, PageHead, SumRow } from "../../components/ui";
@@ -68,12 +68,7 @@ export default function PurchaseReceiptForm() {
     setTaxTemplate(d.taxes_and_charges || "");
     setLines(
       (d.items ?? []).length
-        ? (d.items ?? []).map((row) => ({
-            item_code: row.item_code || "", item_name: row.item_name, uom: row.uom,
-            qty: Number(row.qty) || 1, rate: Number(row.rate) || 0,
-            warehouse: row.warehouse || d.set_warehouse || "",
-            batch_no: row.batch_no || "", serial_no: row.serial_no || "",
-          }))
+        ? (d.items ?? []).map((row) => mappedItem(row, d.set_warehouse || ""))
         : [{ item_code: "", qty: 1, rate: 0 }],
     );
     setSkipReprice(true);
@@ -119,12 +114,7 @@ export default function PurchaseReceiptForm() {
     if (mapped.set_warehouse) setWarehouse(String(mapped.set_warehouse));
     if (mapped.taxes_and_charges) setTaxTemplate(String(mapped.taxes_and_charges));
     const items = (mapped.items as Line[] | undefined) ?? [];
-    setLines(items.map((l) => ({
-      item_code: l.item_code || "", item_name: l.item_name,
-      qty: Number(l.qty) || 1, rate: Number(l.rate) || 0, uom: l.uom,
-      warehouse: l.warehouse || String(mapped.set_warehouse || ""),
-      batch_no: l.batch_no, serial_no: l.serial_no,
-    })));
+    setLines(items.map((l) => mappedItem(l, String(mapped.set_warehouse || ""))));
   }
 
   const buildPreviewDoc = useCallback(() => {
@@ -259,7 +249,11 @@ export default function PurchaseReceiptForm() {
           <Card title={t("txn.getItemsFrom")}>
             <SourceDocPicker
               sources={[
-                { label: t("nav.purchaseOrders"), doctype: DT.purchaseOrder, method: METHOD.makePurchaseReceipt, arg: "source_name" },
+                {
+                  label: t("nav.purchaseOrders"), doctype: DT.purchaseOrder,
+                  method: METHOD.makePurchaseReceipt, arg: "source_name",
+                  filters: [["docstatus", "=", 1], ["status", "not in", ["Closed", "On Hold"]], ["per_received", "<", 99.99]],
+                },
               ]}
               onMapped={applyMapped}
             />

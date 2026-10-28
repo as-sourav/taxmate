@@ -7,6 +7,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { useOpenMapped } from "../../lib/openMapped";
 import { useDoc, useInsert } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canCancelSales, canSubmitSales, canWrite } from "../../lib/roles";
@@ -22,13 +23,13 @@ import { useDeleteDraftAction } from "../../lib/useDraftDelete";
 import { printDocUrl } from "../../lib/printDoc";
 import { isNative } from "../../mobile/platform";
 
-type Line = { item_code?: string; item_name?: string; qty?: number; uom?: string; rate?: number; amount?: number; warehouse?: string; price_list_rate?: number; discount_percentage?: number; discount_amount?: number };
+type Line = { item_code?: string; item_name?: string; qty?: number; uom?: string; rate?: number; amount?: number; warehouse?: string; price_list_rate?: number; discount_percentage?: number; discount_amount?: number; against_sales_invoice?: string };
 type Doc = {
   name: string; customer?: string; customer_name?: string; posting_date?: string;
   company?: string; status?: string; docstatus?: number; currency?: string;
   total?: number; grand_total?: number; net_total?: number; total_taxes_and_charges?: number;
   discount_amount?: number; additional_discount_percentage?: number; apply_discount_on?: string;
-  per_billed?: number; is_return?: number; set_warehouse?: string; items?: Line[];
+  per_billed?: number; per_returned?: number; per_installed?: number; is_return?: number; set_warehouse?: string; items?: Line[];
 };
 
 function dnPill(status?: string): string {
@@ -50,6 +51,14 @@ export default function DeliveryNoteDetail() {
   const amendCall = useFrappePostCall<{ message: { name: string } }>(METHOD.amend);
   const makePickList = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makePickListFromDn);
   const makeSi = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeDnSalesInvoice);
+  const makeShipment = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeShipmentFromDn);
+  const makeInstall = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeInstallationNoteFromDn);
+  const makeTrip = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeDeliveryTripFromDn);
+  const shipment = useOpenMapped("/shipments");
+  const installation = useOpenMapped("/installation-notes");
+  const trip = useOpenMapped("/delivery-trips");
+  const setStatus = useFrappePostCall(METHOD.setDeliveryNoteStatus);
+  const [statusError, setStatusError] = useState<unknown>(null);
   const create = useInsert();
   const [busySi, setBusySi] = useState(false);
   const [busyPick, setBusyPick] = useState(false);
@@ -107,7 +116,24 @@ export default function DeliveryNoteDetail() {
   const canSubmit = canSubmitSales(session.roles);
   const canCancel = canCancelSales(session.roles);
   const writable = canWrite(session);
-  const busyError = deleteAction.error || submitCall.error || cancelCall.error || amendCall.error || makeSi.error || makePickList.error || mapError;
+  const closed = data.status === "Closed";
+  const fromInvoice = (data.items ?? []).some((row) => !!row.against_sales_invoice);
+  const canBill = submitted && writable && !data.is_return && !closed
+    && (data.per_returned ?? 0) !== 100 && (data.per_billed ?? 0) < 100 && !fromInvoice;
+  const canReturn = submitted && writable && !data.is_return && !closed;
+  const canClose = submitted && canSubmit && !closed;
+  const canReopen = submitted && canSubmit && closed;
+  const busyError = statusError || deleteAction.error || submitCall.error || cancelCall.error || amendCall.error || makeSi.error || makePickList.error || mapError || shipment.error || installation.error || trip.error;
+
+  async function changeStatus(status: string) {
+    setStatusError(null);
+    try {
+      await setStatus.call({ name, status });
+      await mutate();
+    } catch (err) {
+      setStatusError(err);
+    }
+  }
 
   return (
     <>
@@ -147,20 +173,41 @@ export default function DeliveryNoteDetail() {
                   {t("inv.print")}
                 </button>
                 )}
-                {submitted && writable && (data.per_billed ?? 0) < 100 && (
+                {canBill && (
                   <button type="button" className="btn" disabled={busySi} onClick={() => void createInvoice()}>
                     {busySi ? t("soc.saving") : t("dn.createSi")}
                   </button>
                 )}
-                {submitted && writable && (
+                {submitted && writable && !closed && (
                   <button type="button" className="btn ghost" disabled={busyPick} onClick={() => void createPickList()}>
                     {busyPick ? t("soc.saving") : t("dn.createPickList")}
                   </button>
                 )}
-                {submitted && !data.is_return && writable && (
+                {submitted && !data.is_return && !closed && (
+                  <>
+                    <button type="button" className="btn ghost" disabled={shipment.busy} onClick={() => void shipment.open(() => makeShipment.call({ source_name: name }))}>Shipment</button>
+                    {(data.per_installed ?? 0) < 100 && (
+                      <button type="button" className="btn ghost" disabled={installation.busy} onClick={() => void installation.open(() => makeInstall.call({ source_name: name }))}>Installation Note</button>
+                    )}
+                    {data.status !== "Completed" && (
+                      <button type="button" className="btn ghost" disabled={trip.busy} onClick={() => void trip.open(() => makeTrip.call({ source_name: name }))}>Delivery Trip</button>
+                    )}
+                  </>
+                )}
+                {canReturn && (
                   <button type="button" className="btn ghost"
                     onClick={() => nav(`/delivery-notes/${encodeURIComponent(name)}/return`)}>
                     {t("dn.return")}
+                  </button>
+                )}
+                {canClose && (
+                  <button type="button" className="btn ghost" disabled={setStatus.loading} onClick={() => void changeStatus("Closed")}>
+                    {t("hist.close")}
+                  </button>
+                )}
+                {canReopen && (
+                  <button type="button" className="btn ghost" disabled={setStatus.loading} onClick={() => void changeStatus("Submitted")}>
+                    Re-open
                   </button>
                 )}
               </>

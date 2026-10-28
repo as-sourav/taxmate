@@ -292,8 +292,16 @@ export default function PurchaseOrderForm() {
           <Card title={t("txn.getItemsFrom")}>
             <SourceDocPicker
               sources={[
-                { label: t("nav.supplierQuotations"), doctype: DT.supplierQuotation, method: METHOD.makeSupplierQuotationPO, arg: "source_name" },
-                { label: t("nav.materialRequests"), doctype: DT.materialRequest, method: METHOD.makeMrPO, arg: "source_name" },
+                {
+                  label: t("nav.supplierQuotations"), doctype: DT.supplierQuotation,
+                  method: METHOD.makeSupplierQuotationPO, arg: "source_name",
+                  filters: [["docstatus", "=", 1], ["status", "not in", ["Stopped", "Expired"]]],
+                },
+                {
+                  label: t("nav.materialRequests"), doctype: DT.materialRequest,
+                  method: METHOD.makeMrPO, arg: "source_name",
+                  filters: [["docstatus", "=", 1], ["material_request_type", "=", "Purchase"], ["status", "!=", "Stopped"], ["per_ordered", "<", 100]],
+                },
               ]}
               onMapped={applyMapped}
             />

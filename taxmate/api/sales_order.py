@@ -188,7 +188,16 @@ def _company_currency(company: str | None) -> str:
 def make_sales_invoice(source_name: str):
 	"""Map a submitted Sales Order to a draft Sales Invoice."""
 	require_login()
-	name = _assert_mappable(source_name, "Sales Invoice", "per_billed")
+	name, doc = _load_submitted(source_name)
+	_require_create("Sales Invoice")
+	if doc.status in ("Closed", "On Hold"):
+		frappe.throw(_("Sales Order {0} is {1}.").format(name, _(doc.status)))
+	# A subcontracted order keeps the invoice button after it is fully billed.
+	if flt(doc.per_billed) >= 100 and not cint(doc.is_subcontracted):
+		frappe.throw(
+			_("Nothing left on {0} to put on a {1}.").format(name, _("Sales Invoice")),
+			title=_("Already Complete"),
+		)
 
 	from erpnext.selling.doctype.sales_order.sales_order import (
 		make_sales_invoice as erp_make_sales_invoice,
@@ -209,7 +218,15 @@ def make_delivery_note(source_name: str, for_reserved_stock=1):
 	free-form kwargs dict so the wire cannot reach the rest of the mapper.
 	"""
 	require_login()
-	name = _assert_mappable(source_name, "Delivery Note", "per_delivered")
+	name, doc = _load_submitted(source_name)
+	_require_create("Delivery Note")
+	if doc.status in ("Closed", "On Hold"):
+		frappe.throw(_("Sales Order {0} is {1}.").format(name, _(doc.status)))
+	if not _can_deliver(doc):
+		frappe.throw(
+			_("Nothing left on {0} to put on a {1}.").format(name, _("Delivery Note")),
+			title=_("Already Complete"),
+		)
 
 	from erpnext.selling.doctype.sales_order.sales_order import (
 		make_delivery_note as erp_make_delivery_note,
@@ -234,33 +251,170 @@ def _as_bool(value) -> bool:
 	return bool(cint(value))
 
 
-def _assert_mappable(source_name: str, target_doctype: str, progress_field: str) -> str:
-	"""Read on the real source, create on the real target, before mapping.
-
-	get_mapped_doc's own ``check_permission("create")`` is skipped when System
-	Settings has apply_strict_user_permissions on (frappe/model/mapper.py:89),
-	so without this a user who cannot create the target would still get the
-	fully mapped document -- rates, margins and all -- back in the response.
-
-	``progress_field`` is the refusal ERPNext's own button gets for free: at
-	100% every row's mapper condition is false, so the mapper happily returns a
-	document with no items and the failure only surfaces as a mandatory-field
-	error on insert.
-	"""
+def _load_submitted(source_name: str):
+	"""Read the real Sales Order. Create permission is checked by the caller."""
 	name = _require_name(source_name, "Sales Order")
-
 	assert_allowed_doctype("Sales Order")
-	assert_allowed_doctype(target_doctype)
-
 	doc = frappe.get_doc("Sales Order", name)
 	doc.check_permission("read")
 	if cint(doc.docstatus) != 1:
 		frappe.throw(_("Submit the Sales Order before creating a downstream document."))
+	return name, doc
+
+
+def _require_create(target_doctype: str) -> None:
+	assert_allowed_doctype(target_doctype)
 	if not frappe.has_permission(target_doctype, "create"):
 		frappe.throw(_("Not permitted to create {0}").format(_(target_doctype)), frappe.PermissionError)
-	if flt(doc.get(progress_field)) >= 100:
+
+
+def _can_deliver(doc) -> bool:
+	"""Desk's Delivery Note button: not a maintenance order, not skipped, still short."""
+	if doc.order_type == "Maintenance" or cint(doc.skip_delivery_note):
+		return False
+	if flt(doc.per_delivered) >= 100:
+		return False
+	if cint(doc.has_unit_price_items):
+		return True
+	for row in doc.items or []:
+		if cint(row.delivered_by_supplier):
+			continue
+		if flt(row.qty) > flt(row.delivered_qty):
+			return True
+	return False
+
+
+# Resume and Re-open both pass Draft. Hold and Close are the other two.
+_STATUS = ("On Hold", "Draft", "Closed")
+
+
+@frappe.whitelist(methods=["POST"])
+def set_status(name: str, status: str, reason: str | None = None) -> dict[str, str]:
+	"""Hold, resume, close, or re-open a Sales Order the way Desk does.
+
+	``Draft`` resumes a held order and also re-opens a closed one. ERPNext
+	then recalculates the real status from delivered and billed quantity.
+	"""
+	require_login()
+	so_name = _require_name(name, "Sales Order")
+	assert_allowed_doctype("Sales Order")
+	if status not in _STATUS:
+		frappe.throw(_("That status is not used on a Sales Order."))
+
+	doc = frappe.get_doc("Sales Order", so_name)
+	doc.check_permission("submit")
+	if cint(doc.docstatus) != 1:
+		frappe.throw(_("Submit the Sales Order first."))
+
+	still_open = flt(doc.per_delivered) < 100 or flt(doc.per_billed) < 100
+	if status == "On Hold":
+		if doc.status in ("Closed", "On Hold") or not still_open:
+			frappe.throw(_("Sales Order {0} is {1}.").format(so_name, _(doc.status)))
+		note = reason.strip() if isinstance(reason, str) else ""
+		if not note:
+			frappe.throw(_("Reason for Hold"))
+		from frappe.desk.form.utils import add_comment
+
+		add_comment(
+			"Sales Order",
+			so_name,
+			_("Reason for hold: {0}").format(note),
+			frappe.session.user,
+			frappe.utils.get_fullname(frappe.session.user),
+		)
+	elif status == "Closed":
+		if doc.status == "Closed" or not still_open:
+			frappe.throw(_("Sales Order {0} is {1}.").format(so_name, _(doc.status)))
+	elif doc.status not in ("On Hold", "Closed"):
+		frappe.throw(_("Sales Order {0} is {1}.").format(so_name, _(doc.status)))
+
+	from erpnext.selling.doctype.sales_order.sales_order import update_status
+
+	update_status(status, so_name)
+	return {"name": so_name, "status": frappe.db.get_value("Sales Order", so_name, "status")}
+
+
+@frappe.whitelist(methods=["POST"])
+def make_pick_list(source_name: str):
+	"""Map a submitted Sales Order to an unsaved Pick List, as Desk's Create button does."""
+	require_login()
+	name, doc = _load_submitted(source_name)
+	_require_create("Pick List")
+	if doc.status in ("Closed", "On Hold") or cint(doc.is_subcontracted):
+		frappe.throw(_("Sales Order {0} is {1}.").format(name, _(doc.status)))
+	if flt(doc.per_picked) >= 100 or flt(doc.per_delivered) >= 100:
 		frappe.throw(
-			_("Nothing left on {0} to put on a {1}.").format(name, _(target_doctype)),
+			_("Nothing left on {0} to put on a {1}.").format(name, _("Pick List")),
 			title=_("Already Complete"),
 		)
-	return name
+	from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import has_reserved_stock
+
+	if has_reserved_stock("Sales Order", name):
+		frappe.throw(_("Sales Order {0} has reserved stock.").format(name))
+	from erpnext.selling.doctype.sales_order.sales_order import create_pick_list
+
+	return _as_data(create_pick_list(name))
+
+
+@frappe.whitelist(methods=["POST"])
+def make_material_request(source_name: str):
+	"""Map a submitted Sales Order to an unsaved Material Request."""
+	require_login()
+	name, doc = _load_submitted(source_name)
+	_require_create("Material Request")
+	if doc.status in ("Closed", "On Hold") or cint(doc.is_subcontracted):
+		frappe.throw(_("Sales Order {0} is {1}.").format(name, _(doc.status)))
+	if doc.order_type == "Maintenance":
+		frappe.throw(_("Sales Order {0} is {1}.").format(name, _(doc.order_type)))
+	if doc.order_type and flt(doc.per_delivered) >= 100:
+		frappe.throw(
+			_("Nothing left on {0} to put on a {1}.").format(name, _("Material Request")),
+			title=_("Already Complete"),
+		)
+	from erpnext.selling.doctype.sales_order.sales_order import (
+		make_material_request as erp_make_material_request,
+	)
+
+	return _as_data(erp_make_material_request(name))
+
+
+@frappe.whitelist(methods=["POST"])
+def get_work_order_items(source_name: str) -> dict:
+	"""Rows Desk shows in Select Items to Manufacture. Nothing is inserted."""
+	require_login()
+	name, doc = _load_submitted(source_name)
+	_require_create("Work Order")
+	if not _can_deliver(doc) or cint(doc.is_subcontracted):
+		frappe.throw(_("Nothing left on {0} to manufacture.").format(name))
+	from erpnext.selling.doctype.sales_order.sales_order import (
+		get_work_order_items as erp_get,
+	)
+
+	return {"items": erp_get(name) or []}
+
+
+@frappe.whitelist(methods=["POST"])
+def make_work_orders(source_name: str, items) -> dict:
+	"""Insert work orders for the BOM and quantity the operator confirmed."""
+	require_login()
+	name, doc = _load_submitted(source_name)
+	_require_create("Work Order")
+	if not _can_deliver(doc) or cint(doc.is_subcontracted):
+		frappe.throw(_("Nothing left on {0} to manufacture.").format(name))
+	if isinstance(items, str):
+		items = frappe.parse_json(items)
+	if isinstance(items, dict):
+		items = items.get("items")
+	if not isinstance(items, list) or not items:
+		frappe.throw(_("Please select atleast one item to continue"))
+	for row in items:
+		if not isinstance(row, dict) or not row.get("bom"):
+			frappe.throw(_("Please select BOM against item {0}").format(row.get("item_code") if isinstance(row, dict) else ""))
+		if not flt(row.get("pending_qty")):
+			frappe.throw(_("Please select Qty against item {0}").format(row.get("item_code")))
+	import json
+
+	from erpnext.selling.doctype.sales_order.sales_order import make_work_orders as erp_make
+
+	names = erp_make(json.dumps({"items": items}), name, doc.company, doc.get("project"))
+	return {"names": names or []}

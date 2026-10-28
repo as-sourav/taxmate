@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { DT } from "../../lib/frappe";
+import { useFrappePostCall } from "frappe-react-sdk";
+import { DT, METHOD } from "../../lib/frappe";
+import { useOpenMapped } from "../../lib/openMapped";
 import { useDoc, useDocList, useInsert, useSave } from "../../lib/resource";
 import { UAE_EMIRATES } from "../../types/uae";
 import { t } from "../../i18n/strings";
@@ -74,6 +76,9 @@ export default function CustomerForm() {
   });
   const terms = useDocList<{ name: string }>(DT.paymentTerms, { fields: ["name"], limit: 50 });
   const create = useInsert();
+  const makeQuote = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeCustomerQuotation);
+  const makeOpp = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeOpportunityFromCustomer);
+  const opportunity = useOpenMapped("/opportunities");
   const update = useSave();
 
   const [form, setForm] = useState({
@@ -246,6 +251,21 @@ export default function CustomerForm() {
         actions={
           <>
             {!isNew ? (<DocHistory doctype={DT.customer} name={name} />) : null}
+            {!isNew ? (
+              <>
+                <button type="button" className="btn ghost" onClick={() => void makeQuote.call({ source_name: name }).then(async (res) => {
+                  const mapped = res?.message;
+                  if (!mapped) throw new Error(t("doc.err.mapFailed"));
+                  const body: Record<string, unknown> = { ...mapped };
+                  delete body.name; delete body.doctype; delete body.__islocal; delete body.__unsaved;
+                  const created = await create.createDoc(DT.quotation, body) as { name: string };
+                  nav(`/quotations/${encodeURIComponent(created.name)}/edit`);
+                }).catch((err) => setSaveError(err))}>{t("nav.quotations")}</button>
+                <button type="button" className="btn ghost" onClick={() => nav("/orders/new", { state: { mapped: { customer: name } } })}>{t("nav.salesOrders")}</button>
+                <button type="button" className="btn ghost" disabled={opportunity.busy} onClick={() => void opportunity.open(() => makeOpp.call({ source_name: name }))}>Opportunity</button>
+                <button type="button" className="btn ghost" onClick={() => nav(`/payments/new?type=Receive&party=${encodeURIComponent(name)}`)}>{t("sod.createPayment")}</button>
+              </>
+            ) : null}
 
             <button className="btn ghost" onClick={() => nav("/customers")}>{t("soc.discard")}</button>
             <button className="btn" disabled={busy || !ready} onClick={() => void save()}>
@@ -254,7 +274,7 @@ export default function CustomerForm() {
           </>
         }
       />
-      {saveError && <ErrorBox error={saveError} />}
+      {(saveError || opportunity.error) && <ErrorBox error={saveError || opportunity.error} />}
 
       <Card num={1} title={t("cust.identity")}>
         <div className="grid2">

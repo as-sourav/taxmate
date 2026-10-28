@@ -71,6 +71,14 @@ SPA_DOC_ROUTES: dict[str, str] = {
 	"Currency Exchange": "/currency-exchanges/{name}/edit",
 	"Asset Category": "/asset-categories/{name}/edit",
 	"Asset": "/assets/{name}",
+	"Opportunity": "/opportunities/{name}",
+	"Request for Quotation": "/request-for-quotations/{name}",
+	"Shipment": "/shipments/{name}",
+	"Installation Note": "/installation-notes/{name}",
+	"Delivery Trip": "/delivery-trips/{name}",
+	"Payment Request": "/payment-requests/{name}",
+	"Subcontracting Order": "/subcontracting-orders/{name}",
+	"Subcontracting Inward Order": "/subcontracting-inward-orders/{name}",
 }
 
 

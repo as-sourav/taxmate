@@ -52,9 +52,34 @@ export default function PurchaseReceiptDetail() {
   const cancelCall = useFrappePostCall(METHOD.cancel);
   const amendCall = useFrappePostCall<{ message: { name: string } }>(METHOD.amend);
   const makePi = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makePrPurchaseInvoice);
+  const makeSe = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makePrStockEntry);
   const create = useInsert();
+  const setStatus = useFrappePostCall(METHOD.setPurchaseReceiptStatus);
   const [busyPi, setBusyPi] = useState(false);
+  const [busySe, setBusySe] = useState(false);
   const [mapError, setMapError] = useState<unknown>(null);
+  const [statusError, setStatusError] = useState<unknown>(null);
+
+  async function createStockEntry() {
+    setBusySe(true);
+    setMapError(null);
+    try {
+      const res = await makeSe.call({ source_name: name });
+      const mapped = res?.message;
+      if (!mapped) throw new Error(t("doc.err.mapFailed"));
+      const body: Record<string, unknown> = { ...mapped };
+      delete body.name;
+      delete body.doctype;
+      delete body.__islocal;
+      delete body.__unsaved;
+      const created = await create.createDoc(DT.stockEntry, body) as { name: string };
+      nav(`/stock-entries/${encodeURIComponent(created.name)}`);
+    } catch (err) {
+      setMapError(err);
+    } finally {
+      setBusySe(false);
+    }
+  }
 
   async function createInvoice() {
     setBusyPi(true);
@@ -87,7 +112,22 @@ export default function PurchaseReceiptDetail() {
   const canSubmit = canSubmitSales(session.roles);
   const canCancel = canCancelSales(session.roles);
   const writable = canWrite(session);
-  const busyError = deleteAction.error || submitCall.error || cancelCall.error || amendCall.error || makePi.error || mapError;
+  const closed = data.status === "Closed";
+  const canBill = submitted && writable && !data.is_return && !closed && (data.per_billed ?? 0) < 100;
+  const canReturn = submitted && writable && !data.is_return && !closed;
+  const canClose = canReturn;
+  const canReopen = submitted && writable && closed;
+  const busyError = statusError || deleteAction.error || submitCall.error || cancelCall.error || amendCall.error || makePi.error || mapError;
+
+  async function changeStatus(status: string) {
+    setStatusError(null);
+    try {
+      await setStatus.call({ name, status });
+      await mutate();
+    } catch (err) {
+      setStatusError(err);
+    }
+  }
 
   return (
     <>
@@ -127,15 +167,30 @@ export default function PurchaseReceiptDetail() {
                   {t("inv.print")}
                 </button>
                 )}
-                {submitted && writable && (data.per_billed ?? 0) < 100 && (
+                {canBill && (
                   <button type="button" className="btn" disabled={busyPi} onClick={() => void createInvoice()}>
                     {busyPi ? t("soc.saving") : t("pr.createPi")}
                   </button>
                 )}
-                {submitted && !data.is_return && writable && (
+                {submitted && !closed && (
+                  <button type="button" className="btn ghost" disabled={busySe} onClick={() => void createStockEntry()}>
+                    {busySe ? t("soc.saving") : t("nav.stockEntries")}
+                  </button>
+                )}
+                {canReturn && (
                   <button type="button" className="btn ghost"
                     onClick={() => nav(`/purchase-receipts/${encodeURIComponent(name)}/return`)}>
                     {t("pr.return")}
+                  </button>
+                )}
+                {canClose && (
+                  <button type="button" className="btn ghost" disabled={setStatus.loading} onClick={() => void changeStatus("Closed")}>
+                    {t("hist.close")}
+                  </button>
+                )}
+                {canReopen && (
+                  <button type="button" className="btn ghost" disabled={setStatus.loading} onClick={() => void changeStatus("Submitted")}>
+                    Re-open
                   </button>
                 )}
               </>

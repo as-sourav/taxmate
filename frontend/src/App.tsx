@@ -161,6 +161,9 @@ import WorkOrderList from "./screens/work-order/WorkOrderList";
 import WorkOrderForm from "./screens/work-order/WorkOrderForm";
 import WorkOrderDetail from "./screens/work-order/WorkOrderDetail";
 import LeadList from "./screens/lead/LeadList";
+import RegisterList from "./screens/registers/RegisterList";
+import RegisterForm from "./screens/registers/RegisterForm";
+import RegisterDetail from "./screens/registers/RegisterDetail";
 import LeadForm from "./screens/lead/LeadForm";
 import LeadDetail from "./screens/lead/LeadDetail";
 // Phase 17 — Pick List
@@ -443,6 +446,38 @@ export default function App() {
           <Route path="/leads/new" element={<LeadForm />} />
           <Route path="/leads/:name/edit" element={<LeadForm />} />
           <Route path="/leads/:name" element={<LeadDetail />} />
+          <Route path="/opportunities" element={<RegisterList specKey="opportunity" />} />
+          <Route path="/opportunities/new" element={<RegisterForm specKey="opportunity" />} />
+          <Route path="/opportunities/:name/edit" element={<RegisterForm specKey="opportunity" />} />
+          <Route path="/opportunities/:name" element={<RegisterDetail specKey="opportunity" />} />
+          <Route path="/request-for-quotations" element={<RegisterList specKey="rfq" />} />
+          <Route path="/request-for-quotations/new" element={<RegisterForm specKey="rfq" />} />
+          <Route path="/request-for-quotations/:name/edit" element={<RegisterForm specKey="rfq" />} />
+          <Route path="/request-for-quotations/:name" element={<RegisterDetail specKey="rfq" />} />
+          <Route path="/shipments" element={<RegisterList specKey="shipment" />} />
+          <Route path="/shipments/new" element={<RegisterForm specKey="shipment" />} />
+          <Route path="/shipments/:name/edit" element={<RegisterForm specKey="shipment" />} />
+          <Route path="/shipments/:name" element={<RegisterDetail specKey="shipment" />} />
+          <Route path="/installation-notes" element={<RegisterList specKey="installation" />} />
+          <Route path="/installation-notes/new" element={<RegisterForm specKey="installation" />} />
+          <Route path="/installation-notes/:name/edit" element={<RegisterForm specKey="installation" />} />
+          <Route path="/installation-notes/:name" element={<RegisterDetail specKey="installation" />} />
+          <Route path="/delivery-trips" element={<RegisterList specKey="trip" />} />
+          <Route path="/delivery-trips/new" element={<RegisterForm specKey="trip" />} />
+          <Route path="/delivery-trips/:name/edit" element={<RegisterForm specKey="trip" />} />
+          <Route path="/delivery-trips/:name" element={<RegisterDetail specKey="trip" />} />
+          <Route path="/payment-requests" element={<RegisterList specKey="paymentRequest" />} />
+          <Route path="/payment-requests/new" element={<RegisterForm specKey="paymentRequest" />} />
+          <Route path="/payment-requests/:name/edit" element={<RegisterForm specKey="paymentRequest" />} />
+          <Route path="/payment-requests/:name" element={<RegisterDetail specKey="paymentRequest" />} />
+          <Route path="/subcontracting-orders" element={<RegisterList specKey="subcontractingOrder" />} />
+          <Route path="/subcontracting-orders/new" element={<RegisterForm specKey="subcontractingOrder" />} />
+          <Route path="/subcontracting-orders/:name/edit" element={<RegisterForm specKey="subcontractingOrder" />} />
+          <Route path="/subcontracting-orders/:name" element={<RegisterDetail specKey="subcontractingOrder" />} />
+          <Route path="/subcontracting-inward-orders" element={<RegisterList specKey="subcontractingInward" />} />
+          <Route path="/subcontracting-inward-orders/new" element={<RegisterForm specKey="subcontractingInward" />} />
+          <Route path="/subcontracting-inward-orders/:name/edit" element={<RegisterForm specKey="subcontractingInward" />} />
+          <Route path="/subcontracting-inward-orders/:name" element={<RegisterDetail specKey="subcontractingInward" />} />
           {/* Phase 17: Pick List */}
           <Route path="/pick-lists" element={<PickListList />} />
           <Route path="/pick-lists/new" element={<PickListForm />} />

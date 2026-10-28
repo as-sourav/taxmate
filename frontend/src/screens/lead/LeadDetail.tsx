@@ -7,6 +7,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useFrappePostCall } from "frappe-react-sdk";
 
 import { DT, METHOD } from "../../lib/frappe";
+import { useOpenMapped } from "../../lib/openMapped";
 import { useDoc, useInsert } from "../../lib/resource";
 import { useSession } from "../../lib/session";
 import { canWrite } from "../../lib/roles";
@@ -30,9 +31,26 @@ export default function LeadDetail() {
   const writable = canWrite(session);
   const { data, error, isLoading, mutate } = useDoc<Doc>(DT.lead, name);
   const convertCall = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.convertLeadToCustomer);
+  const makeQuote = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeLeadQuotation);
+  const makeOpp = useFrappePostCall<{ message: Record<string, unknown> }>(METHOD.makeOpportunityFromLead);
+  const opportunity = useOpenMapped("/opportunities");
   const create = useInsert();
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<unknown>(null);
+
+  async function createQuotation() {
+    setBusy(true); setActionError(null);
+    try {
+      const res = await makeQuote.call({ lead_name: name });
+      const mapped = res?.message;
+      if (!mapped) throw new Error(t("doc.err.mapFailed"));
+      const body: Record<string, unknown> = { ...(mapped as Record<string, unknown>) };
+      delete body.name; delete body.doctype; delete body.__islocal; delete body.__unsaved;
+      const created = await create.createDoc(DT.quotation, body);
+      nav(`/quotations/${encodeURIComponent((created as { name: string }).name)}/edit`);
+    } catch (err) { setActionError(err); }
+    finally { setBusy(false); }
+  }
 
   async function convertToCustomer() {
     setBusy(true); setActionError(null);
@@ -64,10 +82,12 @@ export default function LeadDetail() {
           <>
             <button className="btn ghost" onClick={() => nav(`/leads/${encodeURIComponent(name)}/edit`)}>{t("edit")}</button>
             <button className="btn" onClick={() => void convertToCustomer()} disabled={busy}>{t("lead.convert")}</button>
+            <button className="btn ghost" onClick={() => void createQuotation()} disabled={busy}>{t("nav.quotations")}</button>
+            <button className="btn ghost" onClick={() => void opportunity.open(() => makeOpp.call({ source_name: name }))} disabled={busy || opportunity.busy}>Opportunity</button>
           </>
         )}
       </PageHead>
-      {actionError ? <ErrorBox error={actionError} /> : null}
+      {(actionError || opportunity.error) ? <ErrorBox error={actionError || opportunity.error} /> : null}
       <Card>
         <div className="fg">
           {data.company_name ? <ReadRow k={t("lead.col.company")} v={data.company_name} /> : null}
